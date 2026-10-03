@@ -1,0 +1,41 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+
+# Node
+node_modules/
+frontend/dist/
+
+# Secrets: never commit real environment files
+.env
+.env.local
+*.env
+!.env.example
+
+# Model weights and survey data are supplied locally, not stored in git
+backend/models/*.pth
+backend/models/*.pt
+backend/data/parcels/*
+backend/data/landcover/*
+backend/data/imagery/*
+backend/data/dsm/*
+backend/data/dtm/*
+backend/data/gis/*
+backend/data/gnss/*
+backend/data/satellite/*
+backend/data/survey_of_india/*
+backend/data/land_records/*
+backend/data/documents/*
+backend/data/uploads/
+backend/data/cache/
+backend/data/state/
+backend/processing/
+!**/.gitkeep
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
