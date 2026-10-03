@@ -1,0 +1,21 @@
+# Used by: docker build -f backend/Dockerfile .   (context = repository root)
+.git
+.github
+docs
+frontend
+**/__pycache__
+**/*.pyc
+**/.venv
+**/.env
+backend/models/*.pth
+backend/models/*.pt
+backend/data/parcels/*
+backend/data/landcover/*
+backend/data/imagery/*
+backend/data/satellite/*
+backend/data/dsm/*
+backend/data/dtm/*
+backend/data/cache
+backend/data/state
+backend/processing
+backend/tests

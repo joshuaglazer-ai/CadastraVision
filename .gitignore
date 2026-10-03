@@ -29,7 +29,6 @@ backend/data/satellite/*
 backend/data/survey_of_india/*
 backend/data/land_records/*
 backend/data/documents/*
-backend/data/uploads/
 backend/data/cache/
 backend/data/state/
 backend/processing/

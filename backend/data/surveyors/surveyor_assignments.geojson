@@ -1,0 +1,38 @@
+{
+  "type": "FeatureCollection",
+  "name": "surveyor_assignments",
+  "description": "Survey assignment registry. Each feature is one assignment; its geometry is the assigned boundary (longitude/latitude, WGS 84). 'assigned_to' lists the sign-in e-mail addresses of the surveyors who hold the assignment. An assignment with \"is_demo\": true is offered to signed-in users who hold no assignment of their own, and is labelled DEMO everywhere in the application.",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "assignment_id": "ASGN-2026-001",
+        "is_demo": true,
+        "assigned_to": [],
+        "assignment_status": "active",
+        "assigned_date": "2026-09-15",
+        "survey_type": "Cadastral Resurvey",
+        "priority": "High",
+        "state": "Uttar Pradesh",
+        "district": "Gautam Buddh Nagar",
+        "taluk": "Dadri",
+        "village": "Uplarshi",
+        "department": "Survey of India",
+        "declared_area_ha": 12.5,
+        "boundary_source": "Placeholder rectangle entered by hand for the prototype; not a surveyed or notified boundary."
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [77.6000, 28.5500],
+            [77.6500, 28.5500],
+            [77.6500, 28.5700],
+            [77.6000, 28.5700],
+            [77.6000, 28.5500]
+          ]
+        ]
+      }
+    }
+  ]
+}

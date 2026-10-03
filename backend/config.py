@@ -130,17 +130,12 @@ class Settings:
     def output_dir(self) -> Path:
         return self.processing_dir / "outputs"
 
-    @property
-    def dataset_upload_dir(self) -> Path:
-        return self.data_dir / "uploads"
-
     def ensure_dirs(self) -> None:
         for path in (
             self.cache_dir,
             self.state_db.parent,
             self.upload_dir,
             self.output_dir,
-            self.dataset_upload_dir,
         ):
             path.mkdir(parents=True, exist_ok=True)
 
