@@ -15,6 +15,7 @@ Regions cut by a chunk border are stitched back together afterwards.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
@@ -262,6 +263,17 @@ def polygonize_rasters(
     if export_background:
         classes.add(0)
 
+    from rasterio.features import sieve as sieve_filter
+    from rasterio.windows import Window
+
+    # The sieve runs on each chunk plus a margin, so a region cut by a chunk
+    # border is judged on more than the sliver inside the chunk. Pixels it
+    # reassigns are counted per class.
+    sieve_size = int(sieve_min_pixels or 0)
+    margin = 2 * int(math.ceil(math.sqrt(sieve_size))) if sieve_size > 1 else 0
+    removed = np.zeros(256, dtype=np.int64)
+    gained = np.zeros(256, dtype=np.int64)
+
     regions: list[Region] = []
     with rasterio.open(prediction_path) as pred_src, rasterio.open(
         confidence_path
@@ -269,7 +281,24 @@ def polygonize_rasters(
         width, height = pred_src.width, pred_src.height
         windows = list(chunk_windows(width, height, chunk))
         for done, window in enumerate(windows, start=1):
-            prediction = pred_src.read(1, window=window)
+            if margin:
+                c0 = max(0, int(window.col_off) - margin)
+                r0 = max(0, int(window.row_off) - margin)
+                c1 = min(width, int(window.col_off + window.width) + margin)
+                r1 = min(height, int(window.row_off + window.height) + margin)
+                padded = pred_src.read(1, window=Window(c0, r0, c1 - c0, r1 - r0))
+                valid = (padded != NODATA_CLASS).astype(np.uint8)
+                sieved = sieve_filter(padded, size=sieve_size, mask=valid, connectivity=4)
+                rs = int(window.row_off) - r0
+                cs = int(window.col_off) - c0
+                core = (slice(rs, rs + int(window.height)), slice(cs, cs + int(window.width)))
+                original, prediction = padded[core], np.ascontiguousarray(sieved[core])
+                changed = original != prediction
+                if changed.any():
+                    removed += np.bincount(original[changed], minlength=256)
+                    gained += np.bincount(prediction[changed], minlength=256)
+            else:
+                prediction = pred_src.read(1, window=window)
             confidence = conf_src.read(1, window=window)
             entropy = ent_src.read(1, window=window)
             seam_sides = (
@@ -286,7 +315,7 @@ def polygonize_rasters(
                     classes=classes,
                     col_off=int(window.col_off),
                     row_off=int(window.row_off),
-                    sieve_min_pixels=sieve_min_pixels,
+                    sieve_min_pixels=0,  # already sieved above
                     seam_sides=seam_sides,
                 )
             )
@@ -305,7 +334,13 @@ def polygonize_rasters(
         "regions_before_seam_merge": before,
         "regions": len(regions),
         "seam_merges": sum(1 for region in regions if region.merged_from > 1),
-        "sieve_min_pixels": sieve_min_pixels,
+        "sieve_min_pixels": sieve_size,
+        "sieve_margin_px": margin,
+        "sieve_reassigned": {
+            CLASS_NAMES.get(c, str(c)): {"removed_pixels": int(removed[c]), "gained_pixels": int(gained[c])}
+            for c in range(256)
+            if removed[c] or gained[c]
+        },
         "classes": [CLASS_NAMES[c] for c in sorted(classes)],
         "crs": crs,
         "transform": transform,

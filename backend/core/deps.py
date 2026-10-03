@@ -25,7 +25,7 @@ def current_user(authorization: Optional[str] = Header(default=None)) -> AuthUse
 
 
 def current_context(user: AuthUser = Depends(current_user)) -> SurveyorContext:
-    return resolve_context(user, settings)
+    return resolve_context(user, settings, get_store())
 
 
 def store_dep() -> Store:

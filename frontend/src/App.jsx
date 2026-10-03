@@ -8,6 +8,8 @@ import { LoadingState } from "./components/States";
 import Home from "./pages/Home";
 import About from "./pages/About";
 import Login from "./pages/Login";
+import Signup from "./pages/Signup";
+import CompleteProfile from "./pages/CompleteProfile";
 import ResetPassword from "./pages/ResetPassword";
 import Dashboard from "./pages/Dashboard";
 import MapPage from "./pages/MapPage";
@@ -24,7 +26,7 @@ import Export from "./pages/survey/Export";
  * session the user is sent to /login and brought back afterwards.
  */
 function ProtectedLayout() {
-  const { loading, authenticated } = useAuth();
+  const { loading, authenticated, profileComplete } = useAuth();
   const location = useLocation();
 
   if (loading) {
@@ -36,6 +38,10 @@ function ProtectedLayout() {
   }
   if (!authenticated) {
     return <Navigate to="/login" state={{ from: location }} replace />;
+  }
+  // A government surveyor ID is required before the workspace opens.
+  if (!profileComplete) {
+    return <Navigate to="/complete-profile" state={{ from: location }} replace />;
   }
   return (
     <WorkspaceProvider>
@@ -54,6 +60,8 @@ export default function App() {
           <Route path="/" element={<Home />} />
           <Route path="/about" element={<About />} />
           <Route path="/login" element={<Login />} />
+          <Route path="/signup" element={<Signup />} />
+          <Route path="/complete-profile" element={<CompleteProfile />} />
           <Route path="/reset-password" element={<ResetPassword />} />
 
           <Route element={<ProtectedLayout />}>

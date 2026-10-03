@@ -50,17 +50,55 @@ token as a bearer token. The backend asks Supabase who the token belongs to
 (`GET {SUPABASE_URL}/auth/v1/user` with the anon key) and caches the answer for 60
 seconds. No service-role key is used anywhere.
 
+Surveyors create an account on `/signup` (`supabase.auth.signUp`) or sign in with
+Google (`supabase.auth.signInWithOAuth`, returning to `/login`). The full name is
+stored as `user_metadata.full_name` and becomes the display name.
+
+Every account must also enter a **government surveyor ID**, kept as
+`user_metadata.govt_surveyor_id`: on the sign-up form, or on `/complete-profile`, where
+`ProtectedLayout` sends any signed-in account that has none (typically after a first
+Google sign-in). The backend reads it from the verified `/auth/v1/user` answer like the
+name. It is **self-declared**: the user can set it, nothing checks it against a
+government register, and the API and screens label it `SELF-DECLARED`. After saving
+it the browser refreshes its session, so the server's 60-second identity cache (keyed
+by token) does not keep serving the profile without it. The requirement is enforced by
+the frontend; the API reports `profile_complete` but does not refuse requests from an
+account without an ID.
+
 The surveyor is derived from that verified identity. Request bodies and query strings
 are never read for a surveyor id. `CADASTRA_AUTH=off` replaces the check with a single
 labelled development identity and is for local use only.
 
-## Assignment
+## Assignment and work areas
 
-`backend/data/surveyors/surveyor_assignments.geojson` is the assignment registry: one
-feature per assignment, whose geometry is the assigned boundary and whose `assigned_to`
-lists sign-in e-mail addresses. On each request the backend finds the assignment for the
-signed-in e-mail. A user with none sees the entry marked `is_demo` (if demo fallback is
-allowed), labelled DEMO throughout.
+Every request is answered for the account's **current area**, chosen by
+`services/assignment_service.resolve_context` in this order:
+
+1. the account's active **work area**: a boundary the surveyor drew or uploaded in the
+   app, stored in the `work_areas` table, labelled `SELF-DECLARED WORK AREA` with a
+   note that it is not an official assignment;
+2. a **registry assignment**: a feature of
+   `backend/data/surveyors/surveyor_assignments.geojson` whose `assigned_to` lists the
+   signed-in e-mail, labelled `ASSIGNED` (with several, the one the surveyor activated,
+   kept in `assignment_preferences`, else the first);
+3. the registry's **demo** entry (`is_demo`), labelled `DEMO ASSIGNMENT`, only when
+   `CADASTRA_ALLOW_DEMO_ASSIGNMENT=true`;
+4. nothing: the API says so and the screens say "No work area yet. Add one to begin."
+
+An account never sees another account's work area; its id answers `404` exactly like
+an id that does not exist. Registry assignments are read-only in the app.
+`services/work_area_service.py` validates a boundary before storing it: one Polygon or
+MultiPolygon, reprojected from a declared CRS, structurally checked by
+`gis/geometry.analyse_geometry`, tested for self-intersection with Shapely, and measured
+in the local UTM zone (the client never supplies an area). Each create, edit, delete and
+activation is written to the audit log with before and after values.
+
+The current area provides the boundary drawn on the map, the bounding box every map and
+analytics query is filtered to, and the `assignment_id` recorded on new jobs, reviews and
+export metadata (exports also carry the area's label, so an export from a self-declared
+area says so). In the browser, switching area reloads the profile and remounts the page
+(`AppShell` keys the page on the area id), so the map, figures, review queue and
+analytics are fetched again.
 
 The boundary's area is measured in the local UTM zone. If the registry declares an area
 that differs from the geometry by more than 10%, or the boundary is an axis-aligned
@@ -88,7 +126,9 @@ and writes an SQLite cache with an R-tree:
   not dropped silently;
 - reprojection to longitude/latitude from the file's declared CRS (CRS84, EPSG:4326, any
   UTM zone and Web Mercator without PROJ; any other CRS through pyproj);
-- area, perimeter, extent and compactness measured in the UTM zone of the feature;
+- area, perimeter, extent and compactness measured in the UTM zone of the feature. A
+  supplied `area_m2` is never used: the measured value is, and the number of supplied
+  values that disagree by more than 1 % is recorded in the layer's `area_check`;
 - three geometries per feature: full, 5 cm generalised ("detail") and 40 cm generalised
   ("overview");
 - review priority from `ai/qa.py`.
@@ -136,8 +176,27 @@ Details that matter:
   declared, pure black is treated as NoData and the job reports that. Tiles with no
   valid pixels are skipped. NoData is never classified.
 - **CRS**: the output rasters keep the source CRS and transform. Vectors are measured in
-  the source CRS if it is projected in metres, otherwise in the UTM zone that contains
-  the raster, and written as longitude/latitude GeoJSON for the web map.
+  the source CRS only if it is projected in metres *and* not a Mercator projection;
+  Web Mercator (EPSG:3857, common for exported orthomosaics) and geographic rasters are
+  measured in the UTM zone that contains them. Web Mercator metres are not ground
+  metres: at Uplarshi (28.56 N) they overstate areas 1.30 times and lengths 1.14 times.
+  Area, perimeter and every distance threshold (fragment size, minimum candidate
+  parcel, road access) are applied in the measuring CRS. The ground size of a pixel is
+  measured the same way and reported as `resolution_m` and `pixel_ground_area_m2`.
+  Vectors are written as longitude/latitude GeoJSON for the web map.
+- **Sieve**: before polygonising, connected specks smaller than the minimum mapping
+  unit (`SLIVER_AREA_M2`, divided by the true ground area of one pixel) are merged into
+  the neighbouring class (`rasterio.features.sieve`, 4-connected). Each chunk is sieved
+  with a margin of 2 x sqrt(threshold) pixels so that a region cut by a chunk border is
+  not mistaken for a speck. The pixels reassigned are counted per class (removed and
+  gained, with their ground area) in `run_summary.json` and `qa_report.json` under
+  `sieve`. `SIEVE_MIN_PIXELS` overrides the derived threshold.
+- **Overlap noise**: regions traced from one pixel grid cannot overlap, but after
+  reprojection to the measuring CRS their shared edges can differ by floating-point
+  noise (up to 3 x 10^-7 m2 measured on Uplarshi). Overlaps smaller than 1 % of a
+  pixel are therefore not reported.
+- **Stage timing**: `run_summary.json` records wall-clock seconds per stage under
+  `stage_seconds`; geometry repair reports progress while it runs.
 - **Per-feature uncertainty** is the mean confidence and mean entropy of the feature's
   pixels, computed with one `bincount` per chunk.
 - **Polygonisation** runs in pixel coordinates, so vertices are exact integers and
@@ -226,6 +285,8 @@ method used.
 | `reviews` | Every surveyor decision: feature, action, comment, model confidence and entropy at the time, original and edited geometry, ground truth |
 | `audit_log` | Who did what and when, with before and after values and the reason |
 | `datasets` | Registered datasets |
+| `work_areas` | Self-declared work areas: owner e-mail and surveyor id, name, state, district, taluk, village, boundary (lon/lat GeoJSON), measured area, origin (`drawn` or `uploaded`), whether it is the owner's current area, timestamps |
+| `assignment_preferences` | Which registry assignment an account chose, when it has several |
 
 Jobs survive a restart. A job that was running when the server stopped is marked failed
 with an explanation.
@@ -252,9 +313,11 @@ Three Fiber and Drei, supabase-js, axios.
 | `/` | Home |
 | `/about` | About |
 | `/login`, `/reset-password` | Sign in, forgot password, set a new password |
+| `/signup` | Create a surveyor account (e-mail, or Google) with a government surveyor ID |
+| `/complete-profile` | Enter the government surveyor ID if the account has none |
 | `/dashboard` | Assignment, KPIs, map, review queue |
 | `/map` | Full 2D map and 3D view |
-| `/survey` | Assignment details |
+| `/survey` | Current area, work areas (list, add, edit, delete, activate) |
 | `/survey/datasets` | Dataset discovery and upload |
 | `/survey/processing` | Upload, validate, run, follow stages |
 | `/survey/review` | Review queue, map, decisions, audit trail |
@@ -269,6 +332,8 @@ Everything from `/dashboard` down is inside `ProtectedLayout`, which redirects t
   form, and is reused on the dashboard, the map page and the review page.
 - `components/MapView` fetches features for the visible extent and zoom and draws them
   with Leaflet's canvas renderer.
-- `components/Globe` draws the Earth from a small set of land outlines in
-  `assets/land-outline.json`. The outlines are hand-simplified for decoration and are not
-  a geographic dataset.
+- `components/Globe` draws the Earth at night (NASA-derived day, city-light and cloud
+  textures in `public/textures/earth/`, shaded in a custom shader), with orbit lines and
+  the survey site over India marked. Until the textures load, or if they cannot, it
+  falls back to a texture painted from the hand-simplified outlines in
+  `assets/land-outline.json`. It is decoration and not a geographic dataset.

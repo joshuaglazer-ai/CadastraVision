@@ -341,13 +341,7 @@ def _run(job_id: str, settings: Settings, store: Store) -> None:
 
 def _fail(job_id: str, store: Store, reporter: _Reporter, message: str) -> None:
     reporter.fail_running(message)
-    store.update_job(
-        job_id,
-        status="FAILED",
-        stages=reporter.stages,
-        progress=pipeline.overall_progress(reporter.stages),
-        error=message,
-    )
+    # Audit first: once the job reads FAILED, its audit entry already exists.
     store.add_audit(
         actor_id="system",
         actor_email=None,
@@ -355,6 +349,13 @@ def _fail(job_id: str, store: Store, reporter: _Reporter, message: str) -> None:
         entity_type="job",
         entity_id=job_id,
         after={"error": message},
+    )
+    store.update_job(
+        job_id,
+        status="FAILED",
+        stages=reporter.stages,
+        progress=pipeline.overall_progress(reporter.stages),
+        error=message,
     )
 
 

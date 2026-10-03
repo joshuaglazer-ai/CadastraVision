@@ -1,6 +1,7 @@
 import { useEffect, useId, useState } from "react";
 import { Link, Navigate, useLocation, useNavigate } from "react-router-dom";
 import Globe from "../components/Globe";
+import GoogleSignIn from "../components/GoogleSignIn";
 import Icon from "../components/Icon";
 import PublicNav from "../components/PublicNav";
 import { useAuth } from "../context/AuthContext";
@@ -197,6 +198,12 @@ export default function Login() {
                   {busy ? "Signing in" : "Sign in"}
                 </button>
               </form>
+
+              <GoogleSignIn disabled={!configured || mode === "off"} />
+
+              <p className="auth-card__switch">
+                New surveyor? <Link to="/signup">Create an account</Link>
+              </p>
 
               <p className="auth-card__foot">
                 Your session stays signed in on this device until you sign out. {PRODUCT.disclaimer}

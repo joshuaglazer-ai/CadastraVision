@@ -35,7 +35,7 @@ from backend.gis.geojson_io import (
 )
 from backend.gis.geometry import analyse_geometry
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4  # 4: area, perimeter, length and width always measured in UTM
 
 # Display generalisation. "detail" removes the raster stair-steps only;
 # "overview" is for zoomed-out views.
@@ -331,6 +331,7 @@ class LayerStore:
         self._progress[key].update(state="indexing", total=total)
 
         stat = path.stat()
+        self._area_audit = {"supplied": 0, "disagreeing": 0, "min_ratio": math.inf, "max_ratio": 0.0}
         rows: list[tuple] = []
         used_uids: set[str] = set()
         skipped: list[str] = []
@@ -391,6 +392,16 @@ class LayerStore:
                     "source_crs": crs,
                     "collection_name": header.get("name"),
                     "skipped_examples": [item for item in skipped if item][:25],
+                    "area_check": {
+                        "rule": "area_m2 measured in the feature's UTM zone; supplied values are not used",
+                        "supplied_area_values": self._area_audit["supplied"],
+                        "disagreeing_by_more_than_1pct": self._area_audit["disagreeing"],
+                        "supplied_to_measured_ratio_range": (
+                            [round(self._area_audit["min_ratio"], 4), round(self._area_audit["max_ratio"], 4)]
+                            if self._area_audit["disagreeing"]
+                            else None
+                        ),
+                    },
                     "ingest_seconds": round(time.time() - started, 2),
                     "generalisation": {
                         "detail_tolerance_m": DETAIL_TOLERANCE_M,
@@ -506,13 +517,22 @@ class LayerStore:
             uid = f"{uid}-{index}"
         used_uids.add(uid)
 
-        # ---- measurements: keep supplied attributes, fill gaps -----------
+        # ---- measurements: always measured here, in the feature's UTM zone.
+        # A supplied area_m2 is not trusted: a file measured in Web Mercator
+        # carries areas about 1 / cos^2(latitude) too large. Disagreements
+        # are counted on the layer, not kept as a second area field.
         supplied_area = _first_number(properties, "area_m2")
-        supplied_perimeter = _first_number(properties, "perimeter_m")
-        area = supplied_area if supplied_area is not None else metrics["area_m2"]
-        perimeter = supplied_perimeter if supplied_perimeter is not None else metrics["perimeter_m"]
-        length = _first_number(properties, "length_m")
-        width = _first_number(properties, "width_m")
+        area = metrics["area_m2"]
+        perimeter = metrics["perimeter_m"]
+        audit = getattr(self, "_area_audit", None)
+        if audit is not None and supplied_area is not None:
+            audit["supplied"] += 1
+            if abs(supplied_area - area) > max(0.01 * area, 0.01):
+                audit["disagreeing"] += 1
+                if area > 0:
+                    ratio = supplied_area / area
+                    audit["min_ratio"] = min(audit["min_ratio"], ratio)
+                    audit["max_ratio"] = max(audit["max_ratio"], ratio)
         confidence = _first_number(properties, "confidence", "mean_confidence")
         entropy = _first_number(properties, "entropy", "mean_entropy")
 
@@ -554,12 +574,10 @@ class LayerStore:
                 "class_name": class_label,
                 "area_m2": area,
                 "perimeter_m": perimeter,
-                "length_m": length if length is not None else metrics["length_m"],
-                "width_m": width if width is not None else metrics["width_m"],
-                "measured_area_m2": round(metrics["area_m2"], 6),
-                "measured_perimeter_m": round(metrics["perimeter_m"], 6),
+                "length_m": metrics["length_m"],
+                "width_m": metrics["width_m"],
                 "metric_crs": metrics["metric_crs"],
-                "metrics_source": "attribute" if supplied_area is not None else "computed",
+                "metrics_source": "computed",
                 "compactness": round(metrics["compactness"], 6),
                 "vertex_count": metrics["vertices"],
                 "ring_count": metrics["rings"],

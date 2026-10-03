@@ -66,6 +66,19 @@ export default function Dashboard() {
 
       <DisclaimerBanner />
 
+      {!assignment ? (
+        // A new account has no assignment until an administrator adds its e-mail
+        // to the registry; nothing is created on the surveyor's behalf.
+        <div className="notice notice--warn" role="note">
+          <Icon name="alert" size={18} />
+          <p>
+            <strong>No work area yet. Add one to begin.</strong>{" "}
+            {notes?.[0] || "No survey assignment is registered for this account."}{" "}
+            <Link to="/survey">Add a work area</Link>
+          </p>
+        </div>
+      ) : null}
+
       {assignment?.is_demo && notes?.length ? (
         <div className="notice notice--warn" role="note">
           <Icon name="alert" size={18} />

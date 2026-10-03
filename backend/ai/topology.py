@@ -67,16 +67,22 @@ def repair_geometry(geometry):
     return repaired, "REPAIRED"
 
 
-def validate_geometries(gdf):
-    """Repair geometries; add ``geometry_status``; return ``(gdf, report)``."""
+def validate_geometries(gdf, progress=None):
+    """Repair geometries; add ``geometry_status``; return ``(gdf, report)``.
+
+    ``progress(done, total)`` is called every 500 features.
+    """
 
     gdf = gdf.copy()
     statuses: list[str] = []
     geometries = []
-    for geometry in gdf.geometry:
+    total = len(gdf)
+    for index, geometry in enumerate(gdf.geometry, start=1):
         fixed, status = repair_geometry(geometry)
         geometries.append(fixed)
         statuses.append(status)
+        if progress and (index % 500 == 0 or index == total):
+            progress(index, total)
 
     gdf["geometry"] = geometries
     gdf["geometry_status"] = statuses
@@ -90,11 +96,12 @@ def validate_geometries(gdf):
     }
 
 
-def detect_overlaps(gdf, min_overlap_area: float = 0.0) -> list[dict[str, Any]]:
+def detect_overlaps(gdf, min_overlap_area: float = 0.0, progress=None) -> list[dict[str, Any]]:
     """Pairs of features whose interiors overlap.
 
     Returns ``[{"index_a", "index_b", "overlap_area"}]`` using the frame's
     index labels. Areas are in the frame's CRS units squared.
+    ``progress(done, total)`` is called after each batch of candidate pairs.
     """
 
     import numpy as np
@@ -116,7 +123,18 @@ def detect_overlaps(gdf, min_overlap_area: float = 0.0) -> list[dict[str, Any]]:
     if len(left) == 0:
         return []
 
-    areas = shapely.area(shapely.intersection(geometries[left], geometries[right]))
+    # Neighbouring regions of a segmentation share edges, so most candidate
+    # pairs only touch; the exact intersection is computed in batches so
+    # progress can be reported on large mosaics.
+    areas = np.empty(len(left), dtype=float)
+    batch = 2000
+    for start in range(0, len(left), batch):
+        stop = min(start + batch, len(left))
+        areas[start:stop] = shapely.area(
+            shapely.intersection(geometries[left[start:stop]], geometries[right[start:stop]])
+        )
+        if progress:
+            progress(stop, len(left))
     overlaps = []
     for a, b, area in zip(left, right, areas):
         if area > min_overlap_area:
@@ -139,7 +157,13 @@ def flag_slivers(gdf, area_threshold: float = 1.0, area_column: str | None = Non
     return gdf
 
 
-def run_topology_validation(gdf, sliver_area_threshold: float = 1.0, area_column: str | None = None):
+def run_topology_validation(
+    gdf,
+    sliver_area_threshold: float = 1.0,
+    area_column: str | None = None,
+    progress=None,
+    min_overlap_area: float = 0.0,
+):
     """Complete geometry / topology validation.
 
     Returns ``(validated_gdf, report)``. Features whose geometry is EMPTY
@@ -150,7 +174,14 @@ def run_topology_validation(gdf, sliver_area_threshold: float = 1.0, area_column
     if gdf is None:
         raise ValueError("GeoDataFrame cannot be None.")
 
-    gdf, geometry_report = validate_geometries(gdf)
+    def say(fraction, detail):
+        if progress:
+            progress(fraction, detail)
+
+    gdf, geometry_report = validate_geometries(
+        gdf,
+        progress=lambda done, total: say(0.5 * done / total, f"Validated {done:,} / {total:,} geometries"),
+    )
 
     empty = gdf["geometry_status"] == "EMPTY"
     removed = []
@@ -168,7 +199,13 @@ def run_topology_validation(gdf, sliver_area_threshold: float = 1.0, area_column
 
     gdf = flag_slivers(gdf, area_threshold=sliver_area_threshold, area_column=area_column)
 
-    overlap_records = detect_overlaps(gdf)
+    overlap_records = detect_overlaps(
+        gdf,
+        min_overlap_area=min_overlap_area,
+        progress=lambda done, total: say(
+            0.5 + 0.5 * done / total, f"Checked {done:,} / {total:,} neighbouring pairs for overlap"
+        ),
+    )
     gdf["has_overlap"] = False
     for record in overlap_records:
         for label in (record["index_a"], record["index_b"]):

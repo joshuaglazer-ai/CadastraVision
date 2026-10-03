@@ -500,3 +500,37 @@ class LegacyEndpointTests(ApiCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class GeoPackageExportTests(ApiCase):
+    def test_geopackage_carries_its_metadata(self):
+        try:
+            import pyogrio  # noqa: F401
+        except ImportError as exc:  # pragma: no cover
+            self.skipTest(f"GeoPackage writer not installed: {exc}")
+        import sqlite3
+        import tempfile
+        from pathlib import Path
+
+        response = self.client.get("/api/export/gpkg", params={"layer": "parcels"})
+        self.assertEqual(response.status_code, 200, response.text[:300])
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "export.gpkg"
+            path.write_bytes(response.content)
+            con = sqlite3.connect(path)
+            try:
+                meta = dict(con.execute("SELECT key, value FROM cadastra_vision_metadata"))
+                contents = dict(con.execute("SELECT table_name, data_type FROM gpkg_contents"))
+                description = con.execute(
+                    "SELECT description FROM gpkg_contents WHERE table_name = 'cadastra_vision_parcels'"
+                ).fetchone()[0]
+                count = con.execute("SELECT COUNT(*) FROM cadastra_vision_parcels").fetchone()[0]
+            finally:
+                con.close()
+        self.assertEqual(contents.get("cadastra_vision_metadata"), "attributes")
+        for key in ("model.name", "assignment.assignment_id", "surveyor.surveyor_id", "exported_at", "disclaimer", "legal_notice"):
+            self.assertTrue(meta.get(key), key)
+        self.assertIn("not an official cadastral record", meta["legal_notice"])
+        self.assertIn("processing_job", " ".join(meta))  # null for the existing layers, a job id for job sources
+        self.assertIn("not legal cadastral", description)
+        self.assertEqual(count, len(support.PARCELS))

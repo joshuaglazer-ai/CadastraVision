@@ -53,6 +53,77 @@ export function AuthProvider({ children }) {
     return data.session;
   }, []);
 
+  /**
+   * Create a surveyor account. Resolves to { session, needsConfirmation }:
+   * a session when the project signs new users in straight away, otherwise
+   * needsConfirmation and the user must open the e-mailed link first.
+   */
+  const signUp = useCallback(async (name, email, password, govtId) => {
+    if (AUTH_MODE === "off") {
+      throw new Error("Account creation is unavailable in development mode (VITE_AUTH_MODE=off).");
+    }
+    if (!supabase) {
+      throw new Error(
+        "Account creation is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in frontend/.env."
+      );
+    }
+    const { data, error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: {
+        // The government surveyor ID is self-declared: it is stored in the
+        // account's profile and shown as such, never treated as verified.
+        data: { full_name: name, govt_surveyor_id: govtId },
+        emailRedirectTo: `${window.location.origin}/login`,
+      },
+    });
+    if (error) throw error;
+    // With e-mail confirmation on, Supabase does not reveal an existing
+    // account as an error: it returns a user with no identities instead.
+    if (!data.session && data.user && Array.isArray(data.user.identities) && data.user.identities.length === 0) {
+      const existing = new Error("User already registered");
+      existing.code = "user_already_exists";
+      throw existing;
+    }
+    if (data.session) setSession(data.session);
+    return { session: data.session ?? null, needsConfirmation: !data.session };
+  }, []);
+
+  /** Start Google sign-in. The browser leaves for Google and returns to /login. */
+  const signInWithGoogle = useCallback(async () => {
+    if (AUTH_MODE === "off") {
+      throw new Error("Google sign-in is unavailable in development mode (VITE_AUTH_MODE=off).");
+    }
+    if (!supabase) {
+      throw new Error(
+        "Sign-in is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in frontend/.env."
+      );
+    }
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: "google",
+      options: { redirectTo: `${window.location.origin}/login` },
+    });
+    if (error) throw error;
+  }, []);
+
+  /**
+   * Save the surveyor's name and self-declared government surveyor ID in
+   * their Supabase profile. The session is refreshed afterwards so the next
+   * API request carries a token the server has not cached with the old
+   * profile.
+   */
+  const updateProfile = useCallback(async ({ name, govtId }) => {
+    if (!supabase) throw new Error("Sign-in is not configured.");
+    const data = { govt_surveyor_id: govtId };
+    if (name) data.full_name = name;
+    const { error } = await supabase.auth.updateUser({ data });
+    if (error) throw error;
+    const refreshed = await supabase.auth.refreshSession();
+    if (refreshed.error) throw refreshed.error;
+    setSession(refreshed.data.session);
+    return refreshed.data.session;
+  }, []);
+
   const signOut = useCallback(async () => {
     if (supabase) await supabase.auth.signOut();
     setSession(null);
@@ -90,13 +161,20 @@ export function AuthProvider({ children }) {
       session,
       user: session?.user ?? null,
       authenticated: AUTH_MODE === "off" || Boolean(session),
+      // Every account must have entered a government surveyor ID before it
+      // can open the workspace (development mode has no profile).
+      profileComplete:
+        AUTH_MODE === "off" || Boolean(String(session?.user?.user_metadata?.govt_surveyor_id || "").trim()),
       recovery,
       signIn,
+      signUp,
+      signInWithGoogle,
+      updateProfile,
       signOut,
       requestPasswordReset,
       updatePassword,
     }),
-    [loading, session, recovery, signIn, signOut, requestPasswordReset, updatePassword]
+    [loading, session, recovery, signIn, signUp, signInWithGoogle, updateProfile, signOut, requestPasswordReset, updatePassword]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

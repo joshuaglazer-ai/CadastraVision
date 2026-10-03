@@ -65,6 +65,19 @@ export const getSystemStatus = () => get("/api/system/status");
 export const getMe = () => get("/api/surveyors/me");
 export const getAssignedArea = () => get("/api/map/assigned-area");
 
+// ------------------------------------------------------------ work areas
+// The owner is always the signed-in account; nothing here names it.
+export const listAreas = () => get("/api/assignments");
+export const measureBoundary = async (boundary, signal) =>
+  (await api.post("/api/assignments/measure", { boundary }, { signal })).data;
+export const createWorkArea = async (body) => (await api.post("/api/assignments", body)).data;
+export const updateWorkArea = async (id, body) =>
+  (await api.patch(`/api/assignments/${encodeURIComponent(id)}`, body)).data;
+export const deleteWorkArea = async (id) =>
+  (await api.delete(`/api/assignments/${encodeURIComponent(id)}`)).data;
+export const activateArea = async (id) =>
+  (await api.post(`/api/assignments/${encodeURIComponent(id)}/activate`)).data;
+
 // -------------------------------------------------------------- datasets
 export const getDatasets = () => get("/api/datasets");
 export const getDatasetOverlay = (datasetId) =>

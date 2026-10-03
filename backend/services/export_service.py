@@ -118,6 +118,11 @@ def metadata(
             "taluk": assignment.get("taluk"),
             "village": assignment.get("village"),
             "is_demo": assignment.get("is_demo"),
+            # SELF-DECLARED WORK AREA for a boundary the surveyor drew or uploaded.
+            "label": assignment.get("label"),
+            "kind": assignment.get("kind"),
+            "is_official": assignment.get("is_official"),
+            "name": assignment.get("name"),
         },
         "surveyor": {
             "surveyor_id": context.surveyor_id,
@@ -127,6 +132,7 @@ def metadata(
             {
                 "job_id": job["job_id"],
                 "input_dataset": job["input_dataset"],
+                "generated_at": (job.get("summary") or {}).get("generated_at"),
                 "completed_at": job["updated_at"],
             }
             if job
@@ -297,10 +303,55 @@ def geopackage_bytes(
         raise ExportError("No features match this export.", 404)
 
     frame = gpd.GeoDataFrame(records, geometry=geometries, crs="EPSG:4326")
+    meta = metadata(context, settings, store, source=source, layer=layer, status_filter=status_filter)
+    layer_name = f"cadastra_vision_{layer}"
     with tempfile.TemporaryDirectory() as folder:
         target = Path(folder) / "export.gpkg"
         try:
-            frame.to_file(target, layer=f"cadastra_vision_{layer}", driver="GPKG")
+            frame.to_file(target, layer=layer_name, driver="GPKG")
+            _write_gpkg_metadata(target, layer_name, meta)
         except Exception as exc:
             raise ExportError(f"GeoPackage could not be written: {exc}", 501) from exc
         return target.read_bytes()
+
+
+def _flatten(prefix: str, value: Any, out: list[tuple[str, str]]) -> None:
+    if isinstance(value, dict):
+        for key, inner in value.items():
+            _flatten(f"{prefix}.{key}" if prefix else str(key), inner, out)
+    else:
+        out.append((prefix, "" if value is None else (json.dumps(value) if isinstance(value, list) else str(value))))
+
+
+def _write_gpkg_metadata(path, layer_name: str, meta: dict[str, Any]) -> None:
+    """Embed the export metadata in the GeoPackage.
+
+    A key / value attribute table ``cadastra_vision_metadata`` (registered in
+    ``gpkg_contents``, so GIS software lists it) holds the model, processing
+    job, assignment, surveyor, dates and the disclaimer; the feature layer's
+    description carries the disclaimer as well.
+    """
+
+    import sqlite3
+
+    rows: list[tuple[str, str]] = []
+    _flatten("", meta, rows)
+    connection = sqlite3.connect(str(path))
+    try:
+        connection.execute(
+            "CREATE TABLE cadastra_vision_metadata (key TEXT PRIMARY KEY NOT NULL, value TEXT)"
+        )
+        connection.executemany("INSERT INTO cadastra_vision_metadata (key, value) VALUES (?, ?)", rows)
+        connection.execute(
+            """INSERT INTO gpkg_contents (table_name, data_type, identifier, description, last_change)
+               VALUES ('cadastra_vision_metadata', 'attributes', 'cadastra_vision_metadata', ?,
+                       strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))""",
+            ("Export metadata: model, processing job, assignment, surveyor, dates, disclaimer",),
+        )
+        connection.execute(
+            "UPDATE gpkg_contents SET description = ? WHERE table_name = ?",
+            (f"{meta['record_status']}. {meta['disclaimer']} {meta['legal_notice']}", layer_name),
+        )
+        connection.commit()
+    finally:
+        connection.close()

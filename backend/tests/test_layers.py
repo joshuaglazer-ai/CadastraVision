@@ -66,15 +66,21 @@ class IngestTests(LayerStoreCase):
         self.assertEqual(properties["metrics_source"], "computed")
         self.assertEqual(field["geometry"]["type"], "Polygon")
 
-    def test_supplied_attributes_are_kept_and_the_measurement_recorded_beside_them(self):
+    def test_a_supplied_area_is_replaced_by_the_measurement_and_counted(self):
+        # A file measured in Web Mercator carries areas about 1.30 x too large
+        # at 28.5 N; the index never keeps such a value as area_m2.
         features = support.parcel_features()
-        features[0]["properties"]["area_m2"] = 1234.5
+        features[0]["properties"]["area_m2"] = 1200.0 * 1.3
+        features[1]["properties"]["area_m2"] = None
         path = support.write_json(self.dir / "attr.geojson", support.collection("p", features))
-        self.layers.ensure("existing", "parcels", path)
+        record = self.layers.ensure("existing", "parcels", path)
         properties = self.layers.get("existing", "CAND-000001")["properties"]
-        self.assertEqual(properties["area_m2"], 1234.5)
-        self.assertEqual(properties["metrics_source"], "attribute")
-        self.assertAlmostEqual(properties["measured_area_m2"], 1200.0, delta=0.05)
+        self.assertAlmostEqual(properties["area_m2"], 1200.0, delta=0.05)
+        self.assertEqual(properties["metrics_source"], "computed")
+        self.assertNotIn("measured_area_m2", properties)  # one area field, not two
+        check = record["meta"]["area_check"]
+        self.assertEqual(check["disagreeing_by_more_than_1pct"], 1)
+        self.assertAlmostEqual(check["supplied_to_measured_ratio_range"][1], 1.3, places=3)
 
     def test_no_model_uncertainty_is_recorded_as_absent(self):
         self.ingest()

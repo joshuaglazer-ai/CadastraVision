@@ -443,8 +443,11 @@ export default function Processing() {
                   </dl>
                   {!model.checkpoint_present ? (
                     <p className="field__error">
-                      Copy {model.checkpoint_file} into backend/models on the server.
+                      {model.checkpoint_file_status?.message ||
+                        `Copy ${model.checkpoint_file} into backend/models on the server.`}
                     </p>
+                  ) : model.checkpoint_file_status?.status === "fallback" ? (
+                    <p className="field__hint">{model.checkpoint_file_status.message}</p>
                   ) : null}
                   {model.runtime_error ? <p className="field__error">{model.runtime_error}</p> : null}
                   <p className="uncertainty__note">{model.generalisation_note}</p>

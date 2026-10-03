@@ -13,7 +13,7 @@ from typing import Any
 
 from backend.ai import qa
 from backend.ai.classes import CLASS_KEYS, CLASS_NAMES, KEY_TO_ID
-from backend.config import Settings
+from backend.config import Settings, display_path
 from backend.core import runtime
 from backend.core.store import Store
 from backend.gis.geometry import point_in_geometry
@@ -137,7 +137,7 @@ def features(
             "type": "FeatureCollection",
             "features": [],
             "available": False,
-            "message": "Data unavailable",
+            "message": runtime.unavailable_reason(layer, source),
             "source": source,
             "layer": layer,
         }
@@ -289,7 +289,7 @@ def layer_catalog(
             "group": "AI-generated",
             "available": bool(parcels),
             "default_on": True,
-            "message": None if parcels else "Dataset unavailable",
+            "message": None if parcels else runtime.unavailable_reason("parcels", source),
             "count": parcel_stats["totals"]["features"] if parcel_stats else 0,
             "area_m2": parcel_stats["totals"]["area_m2"] if parcel_stats else None,
         }
@@ -297,6 +297,7 @@ def layer_catalog(
 
     landcover = indexed.get("landcover")
     landcover_stats = layers.stats(source, "landcover", bbox=area) if landcover else None
+    landcover_reason = None if landcover else runtime.unavailable_reason("landcover", source)
     for key in LANDCOVER_CLASSES:
         entry = (landcover_stats or {}).get("classes", {}).get(key)
         name = CLASS_NAMES[KEY_TO_ID[key]]
@@ -309,7 +310,7 @@ def layer_catalog(
                 "available": bool(entry),
                 # Field features share their geometry with candidate parcels.
                 "default_on": key != "field" or not parcels,
-                "message": None if entry else ("Dataset unavailable" if not landcover else "No features of this class"),
+                "message": None if entry else (landcover_reason or "No features of this class"),
                 "count": entry["count"] if entry else 0,
                 "area_m2": entry["area_m2"] if entry else None,
             }
@@ -339,7 +340,10 @@ def layer_catalog(
             "group": "Reference",
             "available": bool(reference),
             "default_on": False,
-            "message": None if reference else "Dataset unavailable",
+            "message": None if reference else (
+                "Dataset unavailable. Add a parcel GeoJSON to "
+                f"{display_path(settings.data_dir / 'land_records')}/ or upload it on the Datasets page."
+            ),
             "count": len(reference),
             "datasets": reference,
         }
@@ -353,7 +357,10 @@ def layer_catalog(
             "group": "Reference",
             "available": gnss["count"] > 0,
             "default_on": gnss["count"] > 0,
-            "message": None if gnss["count"] else "Requires surveyor input",
+            "message": None if gnss["count"] else (
+                "Requires surveyor input. Add a CSV or GeoJSON of points to "
+                f"{display_path(settings.data_dir / 'gnss')}/."
+            ),
             "count": sum(d.get("feature_count") or 0 for d in gnss["datasets"]),
         }
     )
@@ -367,7 +374,9 @@ def layer_catalog(
                 "group": "Elevation",
                 "available": bool(usable),
                 "default_on": False,
-                "message": None if usable else f"{label} dataset unavailable",
+                "message": None if usable else (
+                    f"{label} dataset unavailable. Add a GeoTIFF to {display_path(settings.data_dir / key)}/."
+                ),
                 "count": len(usable),
                 "dataset": usable[0]["name"] if usable else None,
                 "extent": usable[0]["extent"] if usable else None,
@@ -397,4 +406,5 @@ def layer_catalog(
         "data_bbox": data_bbox,
         "class_order": [CLASS_KEYS[i] for i in sorted(CLASS_KEYS)],
         "indexing_errors": runtime.bootstrap_errors(),
+        "data_files": runtime.data_files() if source == runtime.EXISTING_SOURCE else None,
     }

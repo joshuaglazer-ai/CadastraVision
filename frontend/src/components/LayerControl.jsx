@@ -39,6 +39,12 @@ function Swatch({ layerKey }) {
 export default function LayerControl({ catalog, visible, onToggle, defaultOpen = true }) {
   const [open, setOpen] = useState(defaultOpen);
   const layers = catalog?.layers || [];
+  // A missing file disables several rows at once (five land-cover classes);
+  // its explanation is shown on the first of them only.
+  const explained = new Set();
+  const fallbacks = Object.values(catalog?.data_files || {}).filter(
+    (file) => file && file.status === "fallback" && file.message
+  );
   const groups = [];
   for (const layer of layers) {
     let group = groups.find((item) => item.name === layer.group);
@@ -70,6 +76,11 @@ export default function LayerControl({ catalog, visible, onToggle, defaultOpen =
               <div className="layer-group">{group.name}</div>
               {group.layers.map((layer) => {
                 const disabled = !layer.available;
+                let reason = null;
+                if (disabled) {
+                  reason = explained.has(layer.message) ? "Same reason as above" : layer.message;
+                  explained.add(layer.message);
+                }
                 return (
                   <label
                     key={layer.key}
@@ -88,7 +99,7 @@ export default function LayerControl({ catalog, visible, onToggle, defaultOpen =
                         ? formatNumber(layer.count)
                         : ""}
                     </span>
-                    {disabled ? <span className="layer-row__reason">{layer.message}</span> : null}
+                    {reason ? <span className="layer-row__reason">{reason}</span> : null}
                     {layer.key === "assigned_area" && layer.demo ? (
                       <span className="layer-row__reason">Demo boundary</span>
                     ) : null}
@@ -98,6 +109,11 @@ export default function LayerControl({ catalog, visible, onToggle, defaultOpen =
             </div>
           ))}
           {!layers.length ? <p className="layer-row__reason">No layers</p> : null}
+          {fallbacks.map((file) => (
+            <p key={file.expected} className="layer-row__reason">
+              {file.message}
+            </p>
+          ))}
         </div>
       ) : null}
     </div>

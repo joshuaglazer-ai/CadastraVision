@@ -114,6 +114,39 @@ def plan_tiles(width: int, height: int, tile: int, overlap: int) -> list[tuple[t
     return tiles
 
 
+def sieve_threshold(
+    override: int | None, sliver_area_m2: float, pixel_area_m2: float | None
+) -> tuple[int, str]:
+    """Speck size, in pixels, merged into the neighbouring class before
+    polygonising. Derived from the minimum mapping unit unless overridden."""
+
+    if override is not None:
+        return int(override), "SIEVE_MIN_PIXELS override"
+    if pixel_area_m2 and pixel_area_m2 > 0 and sliver_area_m2 > 0:
+        pixels = max(1, int(math.ceil(sliver_area_m2 / pixel_area_m2)))
+        return pixels, (
+            f"minimum mapping unit {sliver_area_m2:g} m² / {pixel_area_m2 * 1e4:.2f} cm² per pixel"
+        )
+    return 8, "fallback: the ground size of a pixel is unknown"
+
+
+def _timed(report: "Report"):
+    """Wrap ``report`` to record wall-clock seconds per stage."""
+
+    starts: dict[str, float] = {}
+    seconds: dict[str, float] = {}
+
+    def wrapped(stage, status, *args, **kwargs):
+        now = time.time()
+        if stage not in starts:
+            starts[stage] = now
+        if status in ("done", "failed"):
+            seconds[stage] = round(now - starts[stage], 1)
+        return report(stage, status, *args, **kwargs)
+
+    return wrapped, seconds
+
+
 def _noop_report(*_args, **_kwargs) -> None:
     return None
 
@@ -278,8 +311,9 @@ def segment_raster(
 
     mean_confidence = confidence_sum / valid_pixels
     mean_entropy = entropy_sum / valid_pixels
-    pixel_area = None
-    if meta.get("resolution_m"):
+    # True ground area of one pixel (UTM-measured for Mercator / geographic rasters).
+    pixel_area = meta.get("pixel_ground_area_m2")
+    if not pixel_area and meta.get("resolution_m"):
         pixel_area = meta["resolution_m"][0] * meta["resolution_m"][1]
 
     report(
@@ -308,6 +342,7 @@ def segment_raster(
         "total_pixels": int(meta["width"]) * int(meta["height"]),
         "mean_confidence": round(mean_confidence, 6),
         "mean_entropy": round(mean_entropy, 6),
+        "pixel_area_m2": pixel_area,
         "confidence_histogram": {
             "bin_edges": [round(edge, 1) for edge in np.linspace(0.0, 1.0, 11).tolist()],
             "pixels": [int(v) for v in confidence_histogram],
@@ -336,7 +371,7 @@ def build_features(
     source_dataset: str,
     generated_at: str,
     chunk: int,
-    sieve_min_pixels: int,
+    sieve_min_pixels: int | None,
     export_background: bool,
     sliver_area_m2: float,
     min_parcel_area_m2: float,
@@ -353,23 +388,44 @@ def build_features(
     from backend.gis.metric import choose_metric_crs, crs_label, metric_properties
 
     # ---- polygonise ----------------------------------------------------
-    report("POLYGONIZE", "running", fraction=0.0, detail="Vectorising class regions")
+    pixel_area = segmentation.get("pixel_area_m2")
+    sieve_pixels, sieve_rule = sieve_threshold(sieve_min_pixels, sliver_area_m2, pixel_area)
+    report("POLYGONIZE", "running", fraction=0.0, detail=f"Vectorising class regions (sieve {sieve_pixels:,} px)")
     regions, info = polygonize_rasters(
         segmentation["prediction_raster"],
         segmentation["confidence_raster"],
         segmentation["entropy_raster"],
         chunk=chunk,
-        sieve_min_pixels=sieve_min_pixels,
+        sieve_min_pixels=sieve_pixels,
         export_background=export_background,
         progress=lambda done, total: report(
             "POLYGONIZE", "running", fraction=done / total, detail=f"{done} / {total} chunks"
         ),
     )
     source_crs = info["crs"]
+    sieve_report = {
+        "min_pixels": sieve_pixels,
+        "rule": sieve_rule,
+        "pixel_area_m2": pixel_area,
+        "margin_px": info.get("sieve_margin_px", 0),
+        "reassigned": {
+            name: {
+                **counts,
+                "removed_area_m2": round(counts["removed_pixels"] * pixel_area, 3) if pixel_area else None,
+                "gained_area_m2": round(counts["gained_pixels"] * pixel_area, 3) if pixel_area else None,
+            }
+            for name, counts in info.get("sieve_reassigned", {}).items()
+        },
+    }
+    moved = sum(c["removed_pixels"] for c in sieve_report["reassigned"].values())
     report(
         "POLYGONIZE",
         "done",
-        detail=f"{len(regions):,} regions from {info['chunks']} chunk(s); {info['seam_merges']} stitched across chunk borders",
+        detail=(
+            f"{len(regions):,} regions from {info['chunks']} chunk(s); {info['seam_merges']} stitched across "
+            f"chunk borders; sieve {sieve_pixels:,} px reassigned {moved:,} px"
+            + (f" ({moved * pixel_area:,.1f} m²)" if pixel_area else "")
+        ),
     )
     if not regions:
         raise PipelineError(
@@ -398,7 +454,15 @@ def build_features(
     # Repair first so that measurements describe the geometry that is kept.
     metric["area_m2"] = metric.geometry.area
     metric, topology = run_topology_validation(
-        metric, sliver_area_threshold=sliver_area_m2, area_column="area_m2"
+        metric,
+        sliver_area_threshold=sliver_area_m2,
+        area_column="area_m2",
+        progress=lambda fraction, detail: report("REPAIR_GEOMETRY", "running", fraction=fraction, detail=detail),
+        # Regions traced from one pixel grid cannot really overlap; after
+        # reprojection to the measuring CRS their shared edges differ only by
+        # floating-point noise (measured up to 3e-7 m2 on Uplarshi). Overlaps
+        # under 1 % of a pixel are that noise, not a topology problem.
+        min_overlap_area=0.01 * pixel_area if pixel_area else 1e-6,
     )
     report(
         "REPAIR_GEOMETRY",
@@ -498,6 +562,7 @@ def build_features(
         "metric_crs_label": crs_label(metric_crs),
         "source_crs_label": crs_label(source_crs),
         "topology": topology,
+        "sieve": sieve_report,
         "polygonize": {k: v for k, v in info.items() if k not in ("crs", "transform")},
         "priority_counts": priority_counts,
     }
@@ -586,7 +651,7 @@ def run_pipeline(
     overlap: int = 64,
     normalization: str = "scale_255",
     chunk: int = 4096,
-    sieve_min_pixels: int = 8,
+    sieve_min_pixels: int | None = None,
     export_background: bool = False,
     sliver_area_m2: float = 1.0,
     min_parcel_area_m2: float = 25.0,
@@ -596,8 +661,8 @@ def run_pipeline(
 ) -> dict[str, Any]:
     """Run the whole pipeline. Returns a JSON-serialisable summary."""
 
-    report = report or _noop_report
     started = time.time()
+    report, stage_seconds = _timed(report or _noop_report)
     input_path = Path(input_path)
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -712,6 +777,7 @@ def run_pipeline(
 
     qa_report = {
         "topology": built["topology"],
+        "sieve": built["sieve"],
         "polygonize": built["polygonize"],
         "priority_counts": built["priority_counts"],
         "note": "Model-derived uncertainty ranks features for review; it is not proof that a feature is wrong.",
@@ -745,6 +811,8 @@ def run_pipeline(
         "classes": class_summary,
         "priority_counts": built["priority_counts"],
         "topology": built["topology"],
+        "sieve": built["sieve"],
+        "stage_seconds": stage_seconds,
         "metric_crs": built["metric_crs_label"],
         "source_crs": built["source_crs_label"],
         "outputs": {

@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
-import { errorMessage, getMe, getSystemStatus } from "../lib/api";
+import { activateArea as postActivate, errorMessage, getMe, getSystemStatus, listAreas } from "../lib/api";
 
 const WorkspaceContext = createContext(null);
 
@@ -14,6 +14,9 @@ export function WorkspaceProvider({ children }) {
   const [system, setSystem] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  // The registry assignments and own work areas this account can switch between.
+  const [areas, setAreas] = useState({ items: [], loading: true, error: "" });
+  const [switching, setSwitching] = useState(false);
   const [source, setSourceState] = useState(
     () => window.sessionStorage.getItem(SOURCE_KEY) || "existing"
   );
@@ -35,9 +38,49 @@ export function WorkspaceProvider({ children }) {
     }
   }, []);
 
+  const loadAreas = useCallback(async () => {
+    setAreas((current) => ({ ...current, loading: true, error: "" }));
+    try {
+      const data = await listAreas();
+      setAreas({ items: data.items || [], loading: false, error: "", limits: data.limits });
+      return data;
+    } catch (err) {
+      setAreas((current) => ({
+        ...current,
+        loading: false,
+        error: errorMessage(err, "Your work areas could not be listed."),
+      }));
+      return null;
+    }
+  }, []);
+
   useEffect(() => {
     load();
-  }, [load]);
+    loadAreas();
+  }, [load, loadAreas]);
+
+  /** Reload the profile and the area list, e.g. after an area changed. */
+  const reloadAreas = useCallback(async () => {
+    await Promise.all([load(), loadAreas()]);
+  }, [load, loadAreas]);
+
+  /**
+   * Make an area current. The server records the choice; the profile is then
+   * reloaded, and every page keyed on the area id remounts and refetches its
+   * map, figures, queue and analytics for the new area. Throws on failure.
+   */
+  const switchArea = useCallback(
+    async (id) => {
+      setSwitching(true);
+      try {
+        await postActivate(id);
+        await Promise.all([load(), loadAreas()]);
+      } finally {
+        setSwitching(false);
+      }
+    },
+    [load, loadAreas]
+  );
 
   const refreshSystem = useCallback(async () => {
     try {
@@ -59,6 +102,10 @@ export function WorkspaceProvider({ children }) {
       loading,
       error,
       reload: load,
+      areas,
+      reloadAreas,
+      switchArea,
+      switching,
       surveyor: profile?.surveyor ?? null,
       assignment: profile?.assignment ?? null,
       notes: profile?.notes ?? [],
@@ -68,7 +115,7 @@ export function WorkspaceProvider({ children }) {
       source,
       setSource,
     }),
-    [loading, error, load, profile, system, refreshSystem, source, setSource]
+    [loading, error, load, areas, reloadAreas, switchArea, switching, profile, system, refreshSystem, source, setSource]
   );
 
   return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>;

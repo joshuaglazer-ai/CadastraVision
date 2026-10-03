@@ -59,7 +59,7 @@ function tooltipText(feature) {
 }
 
 // ------------------------------------------------------------- basemap
-function Basemap({ basemap }) {
+export function Basemap({ basemap }) {
   const config = BASEMAPS[basemap] || BASEMAPS.satellite;
   if (!config.url) return null;
   return (
@@ -74,7 +74,7 @@ function Basemap({ basemap }) {
 }
 
 // ------------------------------------------------------- map furniture
-function MapFurniture({ onReady }) {
+export function MapFurniture({ onReady }) {
   const map = useMap();
 
   useEffect(() => {
@@ -145,12 +145,14 @@ function Readout() {
 }
 
 // ---------------------------------------------------- assigned boundary
-function BoundaryLayer({ boundary, visible }) {
+export function BoundaryLayer({ boundary, visible }) {
   const map = useMap();
 
   useEffect(() => {
     if (!visible || !boundary?.features?.length) return undefined;
-    const demo = Boolean(boundary.features[0]?.properties?.is_demo);
+    const properties = boundary.features[0]?.properties || {};
+    const demo = Boolean(properties.is_demo);
+    const selfDeclared = properties.label === "SELF-DECLARED WORK AREA";
     const layer = L.geoJSON(boundary, {
       pane: "cv-boundary",
       interactive: false,
@@ -174,7 +176,13 @@ function BoundaryLayer({ boundary, visible }) {
         offset: [0, 4],
       })
         .setLatLng([bounds.getNorth(), bounds.getCenter().lng])
-        .setContent(demo ? "Assigned area · demo assignment" : "Assigned area")
+        .setContent(
+          demo
+            ? "Assigned area · demo assignment"
+            : selfDeclared
+              ? "Work area · self-declared, not official"
+              : "Assigned area"
+        )
         .addTo(map);
     }
     return () => {
@@ -664,7 +672,7 @@ function FocusController({ focus, initialBbox }) {
 }
 
 // ------------------------------------------------------- vertex editor
-function VertexEditor({ geometry, onChange }) {
+export function VertexEditor({ geometry, onChange }) {
   const map = useMap();
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;

@@ -1,16 +1,19 @@
 """Surveyor identity and assignment context.
 
-The surveyor is whoever the access token belongs to. The assignment comes
-from the registry file ``data/surveyors/surveyor_assignments.geojson``:
+The surveyor is whoever the access token belongs to. The area the surveyor
+works in is, in this order:
 
-1. an assignment whose ``assigned_to`` lists the signed-in e-mail, else
-2. the registry's demo assignment (``"is_demo": true``) when
-   ``CADASTRA_ALLOW_DEMO_ASSIGNMENT`` is on, clearly labelled DEMO, else
-3. no assignment ("Requires administrator input").
+1. their active **work area** (self-declared in the app, stored in the state
+   database, labelled SELF-DECLARED WORK AREA), else
+2. a registry assignment from ``data/surveyors/surveyor_assignments.geojson``
+   whose ``assigned_to`` lists the signed-in e-mail (the one they chose, when
+   they hold several), labelled ASSIGNED, else
+3. the registry's demo assignment (``"is_demo": true``) when
+   ``CADASTRA_ALLOW_DEMO_ASSIGNMENT`` is on, labelled DEMO, else
+4. nothing ("Requires administrator input" or "add a work area").
 
-Nothing about the assignment is invented here: area is measured from the
-boundary geometry, and disagreements with the declared values are reported
-as notes instead of being hidden.
+Nothing about an area is invented here: area is measured from the boundary
+geometry, and disagreements with declared values are reported as notes.
 """
 
 from __future__ import annotations
@@ -23,7 +26,22 @@ from typing import Any
 
 from backend.config import Settings
 from backend.core.auth import AuthUser
+from backend.core.store import Store, get_store
 from backend.gis.geometry import analyse_geometry
+
+LABELS = {
+    "assigned": "ASSIGNED",
+    "demo": "DEMO ASSIGNMENT",
+    "self_declared": "SELF-DECLARED WORK AREA",
+}
+SELF_DECLARED_NOTE = (
+    "Self-declared work area: the boundary was drawn or uploaded by the surveyor. "
+    "It is not an official survey assignment."
+)
+NO_AREA_NOTE = (
+    "No survey assignment is registered for this account. Requires administrator input, "
+    "or add a work area of your own."
+)
 
 
 @dataclass
@@ -117,8 +135,11 @@ def describe_assignment(feature: dict[str, Any], mode: str) -> tuple[dict[str, A
     notes: list[str] = []
 
     is_demo = bool(properties.get("is_demo")) or mode == "demo"
+    if is_demo:
+        mode = "demo"
     assignment: dict[str, Any] = {
         "assignment_id": str(properties.get("assignment_id") or "UNASSIGNED"),
+        "name": properties.get("name") or properties.get("village"),
         "assignment_status": str(properties.get("assignment_status") or "unknown"),
         "assigned_date": properties.get("assigned_date"),
         "survey_type": properties.get("survey_type"),
@@ -130,7 +151,10 @@ def describe_assignment(feature: dict[str, Any], mode: str) -> tuple[dict[str, A
         "department": properties.get("department"),
         "is_demo": is_demo,
         "mode": mode,
-        "label": "DEMO ASSIGNMENT" if is_demo else "ASSIGNED",
+        "kind": {"assigned": "registry", "demo": "demo", "self_declared": "work_area"}[mode],
+        "is_official": mode == "assigned",
+        "editable": mode == "self_declared",
+        "label": LABELS[mode],
         "boundary_source": properties.get("boundary_source"),
         "declared_area_ha": None,
         "area_ha": None,
@@ -177,36 +201,101 @@ def describe_assignment(feature: dict[str, Any], mode: str) -> tuple[dict[str, A
             0,
             "Demo assignment: this boundary is not an authoritative survey assignment.",
         )
+    elif mode == "self_declared":
+        notes.insert(0, SELF_DECLARED_NOTE)
     if properties.get("boundary_source"):
         notes.append(str(properties["boundary_source"]))
 
     return assignment, boundary, notes
 
 
-def resolve_context(user: AuthUser, settings: Settings) -> SurveyorContext:
-    """Build the surveyor + assignment context for an authenticated user."""
+def work_area_feature(area: dict[str, Any]) -> dict[str, Any]:
+    """A stored work area in the shape of a registry feature."""
 
-    surveyor: dict[str, Any] = {
+    if area["origin"] == "drawn":
+        source = "Drawn by the surveyor in the app"
+    else:
+        source = "Uploaded by the surveyor as GeoJSON"
+    return {
+        "type": "Feature",
+        "properties": {
+            "assignment_id": area["area_id"],
+            "name": area["name"],
+            "assignment_status": "active" if area.get("is_active") else "inactive",
+            "state": area.get("state"),
+            "district": area.get("district"),
+            "taluk": area.get("taluk"),
+            "village": area.get("village"),
+            "boundary_source": source,
+        },
+        "geometry": area["geometry"],
+    }
+
+
+def describe_work_area(area: dict[str, Any]) -> tuple[dict[str, Any], dict | None, list[str]]:
+    assignment, boundary, notes = describe_assignment(work_area_feature(area), "self_declared")
+    assignment.update(
+        {
+            "origin": area["origin"],
+            "is_active": bool(area.get("is_active")),
+            "created_at": area.get("created_at"),
+            "updated_at": area.get("updated_at"),
+        }
+    )
+    return assignment, boundary, notes
+
+
+def registry_assignments_for(email: str, settings: Settings) -> tuple[list[dict[str, Any]], str | None]:
+    """Registry features that list ``email`` in ``assigned_to``."""
+
+    features, error = load_registry(settings.assignments_file)
+    email = email.strip().lower()
+    return [f for f in features if email in _emails(f.get("properties") or {})], error
+
+
+def _base_surveyor(user: AuthUser) -> dict[str, Any]:
+    return {
         "surveyor_id": surveyor_id_for(user),
         "name": _display_name(user),
         "email": user.email,
         "auth_user_id": user.user_id,
         "is_dev_session": user.is_dev,
+        "govt_surveyor_id": user.govt_surveyor_id,
+        # Entered by the surveyor; not checked against any government register.
+        "govt_surveyor_id_status": "SELF-DECLARED" if user.govt_surveyor_id else None,
+        "profile_complete": bool(user.govt_surveyor_id) or user.is_dev,
         "designation": None,
         "department": None,
     }
 
+
+def resolve_context(user: AuthUser, settings: Settings, store: Store | None = None) -> SurveyorContext:
+    """Build the surveyor + area context for an authenticated user."""
+
+    store = store or get_store()
+    surveyor = _base_surveyor(user)
+
+    # 1. The surveyor's own active work area.
+    area = store.active_work_area(user.email)
+    if area is not None:
+        assignment, boundary, notes = describe_work_area(area)
+        return SurveyorContext(surveyor=surveyor, assignment=assignment, boundary=boundary, notes=notes)
+
     features, error = load_registry(settings.assignments_file)
-    if error:
-        return SurveyorContext(surveyor=surveyor, assignment=None, notes=[error])
+    registry_notes = [error] if error else []
 
+    # 2. A registry assignment for this e-mail; the chosen one when several.
+    mine = [f for f in features if user.email in _emails(f.get("properties") or {})]
     matched = None
-    for feature in features:
-        if user.email in _emails(feature.get("properties") or {}):
-            matched = feature
-            break
-
+    if mine:
+        preferred = store.preferred_registry_assignment(user.email)
+        matched = next(
+            (f for f in mine if str((f.get("properties") or {}).get("assignment_id")) == preferred),
+            mine[0],
+        )
     mode = "assigned"
+
+    # 3. The demo assignment, only when allowed.
     if matched is None and settings.allow_demo_assignment:
         matched = next(
             (f for f in features if (f.get("properties") or {}).get("is_demo")), None
@@ -217,10 +306,7 @@ def resolve_context(user: AuthUser, settings: Settings) -> SurveyorContext:
         return SurveyorContext(
             surveyor=surveyor,
             assignment=None,
-            notes=[
-                "No survey assignment is registered for this account. "
-                "Requires administrator input."
-            ],
+            notes=registry_notes or [NO_AREA_NOTE],
         )
 
     properties = matched.get("properties") or {}

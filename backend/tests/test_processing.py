@@ -64,7 +64,10 @@ class ProcessingCase(ApiCase):
         deadline = time.time() + timeout
         while time.time() < deadline:
             job = self.ok(f"/api/processing/{job_id}")
-            if job["status"] in states:
+            # Also wait for the worker thread to let go of the job: on Windows
+            # its database connection must be closed before the test's
+            # temporary state database can be deleted.
+            if job["status"] in states and job_id not in processing_service._running:
                 return job
             time.sleep(0.05)
         self.fail(f"job {job_id} did not reach {states}")

@@ -47,6 +47,20 @@ class AssignmentTests(unittest.TestCase):
         self.assertTrue(any("No survey assignment" in note for note in context.notes))
         self.assertEqual(assignment_service.boundary_feature_collection(context)["features"], [])
 
+    def test_new_account_is_never_given_an_assignment_automatically(self):
+        registry = settings.assignments_file.read_bytes()
+        newcomer = user("new.signup@example.test", name="New Surveyor")
+        strict = replace(settings, allow_demo_assignment=False)
+        context = assignment_service.resolve_context(newcomer, strict)
+        self.assertIsNone(context.assignment)
+        self.assertEqual(context.surveyor["name"], "New Surveyor")
+        self.assertEqual(context.notes, [assignment_service.NO_AREA_NOTE])
+        self.assertIn("Requires administrator input", context.notes[0])
+        demo = assignment_service.resolve_context(newcomer, settings)
+        self.assertTrue(demo.assignment["is_demo"])
+        # Resolving the context reads the registry and never writes to it.
+        self.assertEqual(settings.assignments_file.read_bytes(), registry)
+
     def test_missing_registry_is_reported_not_invented(self):
         with tempfile.TemporaryDirectory() as folder:
             empty = replace(settings, data_dir=Path(folder))

@@ -26,7 +26,7 @@ LOGIN → SURVEYOR → ASSIGNED AREA → DATASETS → AI PROCESSING → SIX-CLAS
 | `backend/` | FastAPI service: authentication, assignment, datasets, AI pipeline, GIS layer index, reviews, analytics, export, terrain |
 | `backend/ai/` | U-Net / ResNet34 model, windowed inference, polygonisation, geometry repair, QA, candidate parcels |
 | `backend/gis/` | GeoJSON reader, CRS handling, metric measurement, indexed layer cache |
-| `backend/tests/` | 202 tests (see [Tests](#tests)) |
+| `backend/tests/` | 240 tests (see [Tests](#tests)) |
 | `frontend/` | React + Vite + Leaflet + React Three Fiber application |
 | `docs/` | [architecture](docs/architecture.md), [API](docs/api.md), [deployment](docs/deployment.md) |
 
@@ -40,7 +40,24 @@ These are not stored in git (they are large, and the repository is public).
 | `candidate_parcels.geojson` (53 MB) | `backend/data/parcels/` | Existing candidate parcel layer |
 | `uplarshi_landcover_with_attributes.geojson` (122 MB) | `backend/data/landcover/` | Existing land-cover layer |
 
-Use exactly those file names. Optional datasets go in `backend/data/imagery/`,
+The quickest way to put them there, from a folder where you downloaded them:
+
+```bash
+python -m backend.scripts.prepare_data --from ~/Downloads
+```
+
+This also recognises browser download names such as `candidate_parcels (2).geojson` and
+`best_weighted_multiclass_unet(2).pth`, copies each file to its place under the clean
+name, builds the layer index, and prints what it copied and what it could not find. It
+never picks between differing copies: if your folder has two different
+`uplarshi_landcover_with_attributes (n).geojson` files, it copies neither and tells you.
+
+If a file sits in its folder under another name, the backend uses it as long as it is the
+only file of that type there. With several candidates it uses none, and the layer
+control, the Datasets page and `/api/system/status` say which file is expected and
+which files are in the way.
+
+Optional datasets go in `backend/data/imagery/`,
 `satellite/`, `dsm/`, `dtm/`, `land_records/`, `gis/`, `survey_of_india/`, `documents/`
 and `gnss/`, or are uploaded from the Datasets page. A category with no file is shown as
 **Not available**; nothing is generated to fill it.
@@ -78,15 +95,38 @@ cp .env.example .env                   # then fill in VITE_SUPABASE_URL and VITE
 npm run dev                            # http://localhost:5173
 ```
 
-### 3. Signing in
+### 3. Accounts, sign-in and work areas
 
-Authentication uses Supabase e-mail and password. Create the surveyor's user in your
-Supabase project (Authentication → Users), then list their e-mail under `assigned_to` in
-`backend/data/surveyors/surveyor_assignments.geojson` to give them an assignment
-(format in [docs/deployment.md](docs/deployment.md#assignments)).
+Authentication uses Supabase. A surveyor either creates an account on **Create an
+account** (`/signup`: full name, government surveyor ID, e-mail, password of at least 8
+characters) or uses **Continue with Google**. E-mail sign-up must be enabled in the
+Supabase project, and Google sign-in needs the Google provider configured there
+([docs/deployment.md](docs/deployment.md#sign-in-with-google)). With e-mail confirmation
+on, a new e-mail account opens the link sent to it before signing in.
+
+Every account must enter a **government surveyor ID** before the workspace opens; a
+Google account is asked for it once, after its first sign-in. The ID is stored in the
+account's Supabase profile and is **self-declared**: nothing checks it against a
+government register, and the application labels it so.
+
+On the **Survey workspace** page a surveyor manages their **work areas**: draw a
+boundary on the map, upload it as a GeoJSON file, or take the current map view as a
+rough rectangle; then name it and give its state, district, taluk and village. The
+server checks the boundary and measures it. Work areas are labelled **SELF-DECLARED WORK
+AREA** everywhere, including exports; they are not official assignments. A switcher in
+the bar under the navigation moves between the account's areas, and the map, key
+figures, review queue and analytics follow the current one.
+
+Official assignments come from `backend/data/surveyors/surveyor_assignments.geojson`:
+an administrator lists the surveyor's sign-in e-mail under `assigned_to`. They are
+labelled ASSIGNED and are read-only in the app. Each account sees only its own work
+areas and the registry assignments for its e-mail. An account with neither sees the
+DEMO assignment when `CADASTRA_ALLOW_DEMO_ASSIGNMENT=true`; with `false` (recommended for
+production) it sees "No work area yet. Add one to begin."
 
 To try the application without Supabase, run both halves in the explicit development
-mode. Every screen then carries a "Development session" banner.
+mode. Every screen then carries a "Development session" banner, and the sign-up page
+says that account creation is unavailable in this mode.
 
 ```bash
 # backend/.env            # frontend/.env
@@ -110,7 +150,7 @@ Backend (`backend/.env`; every variable is optional except the two Supabase valu
 | `MODEL_NORMALIZATION` | `scale_255` | Input scaling; must match training (see architecture notes) |
 | `TILE_SIZE`, `TILE_OVERLAP` | `512`, `64` | Inference window and context margin, in pixels |
 | `POLYGONIZE_CHUNK` | `4096` | Polygonisation chunk, in pixels |
-| `SIEVE_MIN_PIXELS` | `8` | Specks smaller than this are merged into their neighbour |
+| `SIEVE_MIN_PIXELS` | derived | Specks smaller than this many pixels are merged into the neighbouring class before polygonising. Unset: `SLIVER_AREA_M2` divided by the true ground area of one pixel (1,468 px for the 2.6 cm Uplarshi orthomosaic). Set it only to override. |
 | `SLIVER_AREA_M2` | `1.0` | Minimum mapping unit; smaller features are fragments |
 | `MIN_CANDIDATE_PARCEL_M2` | `25` | Minimum size counted as a candidate parcel |
 | `ROAD_ACCESS_DISTANCE_M` | `5` | A road within this distance counts as road access |
@@ -158,31 +198,32 @@ checkpoint skip themselves when those are absent and say why.
 
 ### What has been run, and what has not
 
-The development environment this version was built in had no access to the Python and
-npm package registries, so PyTorch, Rasterio, GeoPandas, Shapely, FastAPI, Leaflet,
-Three.js and Vite could not be installed there. The record below is what that leaves.
+On Windows 11 with Python 3.13, PyTorch 2.14 (CPU) and Node.js 22, on 3 October 2026:
 
-Run and passing there:
-
-- 166 of the 202 backend tests: geometry and projection, GeoJSON validation, the layer
-  index, QA rules, persistence, authentication, assignment, processing-job state, parcel
-  reasoning, and the HTTP API. FastAPI itself could not be installed, so the API tests
-  ran through a small stand-in built on Starlette (the library FastAPI is built on).
-  They have not yet run against FastAPI proper.
-- Every API endpoint against the real Uplarshi layers (1,752 candidate parcels and 5,363
-  land-cover features).
-- The checkpoint's 278 tensors, read without PyTorch and compared with the model layout.
-- The 8 frontend unit tests, a bundle of the frontend source, and screenshots of every page.
-
-Written but **not yet run anywhere**:
-
-- 36 backend tests that need PyTorch, Rasterio, GeoPandas or Shapely: model loading, the
+- `python -m pytest backend/tests`: all 240 tests pass against FastAPI, PyTorch,
+  Rasterio, GeoPandas and Shapely, none skipped. This includes model loading, the
   end-to-end pipeline on a synthetic GeoTIFF, polygonisation, geometry repair, DSM/DTM
-  heights.
-- The AI pipeline with the real checkpoint on real imagery.
-- GeoPackage export.
-- `npm run build`, the Leaflet map, the 3D globe and 3D view with the real libraries.
-- Supabase sign-in.
+  heights, the file-name fallback for the three required files, and work areas
+  (create, list, edit, delete, activate, isolation between two accounts, rejected
+  geometry, precedence of the current area, audit entries).
+- `python -m backend.scripts.selfcheck`: all checks pass, including the real checkpoint
+  loaded strictly and run through the whole pipeline on a synthetic GeoTIFF.
+- `python -m backend.scripts.prepare_data --from <downloads folder>` with the real files.
+- `npm test` (22 tests), `npm run lint` and `npm run build`.
+- The home, sign-in and sign-up pages, with the 3D globe, rendered in Chrome.
+- In development mode, driven in Chrome: adding a work area by clicking its corners on
+  the map, by uploading a GeoJSON file in UTM, and from the map view; the measurement
+  shown is the server's; the list, the area switcher and the labels.
+
+Not yet run:
+
+- The AI pipeline with the real checkpoint on real drone imagery (no orthoimage is in
+  the project; see below).
+- GeoPackage export (no test covers it).
+- Supabase sign-in, account creation, Google sign-in and saving the government
+  surveyor ID against a live Supabase project (no test account was available). The sign-up
+  error messages are written from Supabase's documented error codes and are unit-tested
+  as such, not observed from a live project.
 
 Run `python -m backend.scripts.selfcheck`, `python -m pytest backend/tests` and
 `npm run build` on your machine first. If any of them fails, that is a defect to fix, not
@@ -190,11 +231,38 @@ a setup problem to work around.
 
 ## Known limitations
 
+### What the model output supports (measured on the Uplarshi centre crop)
+
+These are properties of what the model produces, measured on job `JOB-98528EC34E`, not
+gaps in the code:
+
+- **Automatic plot boundaries are not supported by this output, so the application does
+  not propose them.** Splitting land blocks into plots needs blocks that hold buildings:
+  - The detected roads do not form a closed network. The crop's 64 road features remain
+    64 separate pieces, and removing them from the crop leaves **one road-bounded block**
+    of 10,847 m² (of 11,932 m²). Widening every road by 1 m or 2 m to close gaps still
+    leaves one block.
+  - **No candidate parcel contains a building.** Candidate parcels are Field regions,
+    and Field and Building are separate classes of the segmentation.
+  - The model merges neighbouring roofs: the crop has **16 buildings of 5 m² or more**
+    (6,853 m²), against **21** in the existing land-cover layer over the same ground, and
+    16 % more building area (6,880 m² against 5,955 m²).
+- **Most features are ranked High for review.** On the crop, 136 of 194 features (70 %)
+  are High, all of them because the feature's mean model confidence is below 0.60
+  (range 0.34 to 0.60, median 0.46); 111 also have high entropy. 84 of the 136 are under
+  5 m², pieces made mostly of class-boundary pixels where the model is least sure. Mean
+  confidence is 0.74 per pixel and 0.54 per feature. The thresholds are unchanged
+  starting values, not calibrated against ground truth, so the ranking orders the
+  review but is not a measure of error.
+
+### Data that does not exist yet
+
 These follow from data that does not exist yet, not from missing code:
 
-- **No orthoimage is in the project**, so the model has not been run on real imagery
-  here. Upload a GeoTIFF on the Processing page to produce features with confidence and
-  entropy.
+- **The orthoimage is not in git.** The Uplarshi orthomosaic (`uplarshi.tif`, 1.09 GB,
+  Web Mercator, 2.6 cm ground pixels) is supplied locally in `backend/data/imagery/`.
+  The measurements below come from a 4096 x 4096 px crop over the village centre
+  (`uplarshi_centre_4096.tif`, 1.19 ha), processed with the current pipeline.
 - **The two existing layers carry no confidence or entropy.** They were exported before
   those were recorded. Their review priority therefore comes from geometry and road
   access only, and the application says "Model uncertainty not recorded".

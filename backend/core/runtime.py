@@ -14,7 +14,7 @@ import threading
 from pathlib import Path
 from typing import Any
 
-from backend.config import Settings, settings
+from backend.config import FileResolution, Settings, settings
 from backend.core.store import Store, get_store
 from backend.gis.layers import GeoJSONError, LayerStore
 
@@ -61,8 +61,48 @@ def job_output_dir(job_id: str) -> Path:
     return settings.output_dir / job_id
 
 
+def existing_layer_resolutions() -> dict[str, FileResolution]:
+    """How each existing layer file was found (exact name, fallback, ...)."""
+
+    return {"parcels": settings.parcels_resolution, "landcover": settings.landcover_resolution}
+
+
 def existing_layer_files() -> dict[str, Path]:
-    return {"parcels": settings.parcels_file, "landcover": settings.landcover_file}
+    """The file each existing layer is read from.
+
+    The exact file name, else the single GeoJSON in the layer's folder. When
+    the folder is empty or holds several candidates the expected path is
+    returned; it does not exist, so the layer is reported unavailable.
+    """
+
+    return {
+        kind: resolution.path or resolution.expected
+        for kind, resolution in existing_layer_resolutions().items()
+    }
+
+
+def data_files() -> dict[str, dict[str, Any]]:
+    """The three required files, as reported by ``/api/system/status``."""
+
+    resolutions = {**existing_layer_resolutions(), "model": settings.model_resolution}
+    return {kind: resolution.describe() for kind, resolution in resolutions.items()}
+
+
+def unavailable_reason(kind: str, source: str = EXISTING_SOURCE) -> str:
+    """Why a layer of ``source`` cannot be drawn, in words an operator can act on."""
+
+    error = _bootstrap_errors.get(f"{source}|{kind}")
+    if source != EXISTING_SOURCE:
+        if error:
+            return f"The job output could not be read: {error}"
+        return "This processing job did not produce the layer."
+    resolution = existing_layer_resolutions()[kind]
+    if error:
+        name = resolution.path.name if resolution.path else resolution.expected.name
+        return f"{name} could not be read: {error}"
+    if resolution.usable:
+        return "Dataset unavailable"
+    return resolution.describe()["message"]
 
 
 def ensure_source(source: str) -> dict[str, Any]:

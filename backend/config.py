@@ -62,6 +62,103 @@ def _list(name: str, default: list[str]) -> list[str]:
     return [item.strip() for item in raw.split(",") if item.strip()]
 
 
+PARCELS_FILE_NAME = "candidate_parcels.geojson"
+LANDCOVER_FILE_NAME = "uplarshi_landcover_with_attributes.geojson"
+MODEL_FILE_NAME = "best_weighted_multiclass_unet.pth"
+
+
+@dataclass(frozen=True)
+class FileResolution:
+    """Where a required file was looked for and what was found.
+
+    ``status`` is one of:
+
+    * ``found``     - the expected file exists under its exact name
+    * ``fallback``  - it does not, but its folder holds exactly one file of
+                      the same type (for example a browser download named
+                      ``candidate_parcels (2).geojson``), which is used
+    * ``ambiguous`` - several files of that type and none with the exact
+                      name; nothing is used, because guessing could load the
+                      wrong data
+    * ``missing``   - no file of that type in the folder
+    """
+
+    expected: Path
+    path: Path | None
+    status: str
+    candidates: tuple[Path, ...] = ()
+
+    @property
+    def usable(self) -> bool:
+        return self.path is not None
+
+    def describe(self) -> dict:
+        """JSON form for the API. Paths are shown relative to the project."""
+
+        folder = display_path(self.expected.parent)
+        expected = display_path(self.expected)
+        if self.status == "found":
+            message = None
+        elif self.status == "fallback":
+            message = (
+                f"Using {self.path.name} because {self.expected.name} is not present in {folder}/. "
+                f"Rename it to {self.expected.name} to make this explicit."
+            )
+        elif self.status == "ambiguous":
+            names = ", ".join(path.name for path in self.candidates)
+            message = (
+                f"Several {self.expected.suffix} files in {folder}/ ({names}) and none is named "
+                f"{self.expected.name}. Keep one, or rename the right one to {self.expected.name}."
+            )
+        else:
+            message = f"Expected file {expected} is missing. Place the file there under that name."
+        return {
+            "status": self.status,
+            "expected": expected,
+            "used": self.path.name if self.path else None,
+            "candidates": [path.name for path in self.candidates],
+            "message": message,
+        }
+
+
+def display_path(path: Path) -> str:
+    """A path as the operator would type it from the repository root.
+
+    Paths outside the repository (for example a ``CADASTRA_DATA_DIR`` on
+    another disk) are shown from their last two components so that server
+    paths are not exposed in API responses.
+    """
+
+    path = Path(path)
+    try:
+        return path.resolve().relative_to(BASE_DIR.parent.resolve()).as_posix()
+    except ValueError:
+        return Path(*path.parts[-3:]).as_posix() if len(path.parts) >= 3 else path.name
+
+
+def resolve_file(expected: Path) -> FileResolution:
+    """Find ``expected``, or the only file of its type in the same folder."""
+
+    expected = Path(expected)
+    if expected.is_file():
+        return FileResolution(expected, expected, "found")
+    folder = expected.parent
+    suffix = expected.suffix.lower()
+    candidates: tuple[Path, ...] = ()
+    if folder.is_dir():
+        candidates = tuple(
+            sorted(
+                (p for p in folder.iterdir() if p.is_file() and p.suffix.lower() == suffix),
+                key=lambda p: p.name.lower(),
+            )
+        )
+    if len(candidates) == 1:
+        return FileResolution(expected, candidates[0], "fallback", candidates)
+    if candidates:
+        return FileResolution(expected, None, "ambiguous", candidates)
+    return FileResolution(expected, None, "missing")
+
+
 @dataclass
 class Settings:
     """Runtime settings. Construct with ``load_settings()``."""
@@ -69,7 +166,8 @@ class Settings:
     # --- locations -------------------------------------------------------
     base_dir: Path = BASE_DIR
     data_dir: Path = BASE_DIR / "data"
-    model_path: Path = BASE_DIR / "models" / "best_weighted_multiclass_unet.pth"
+    # Where the checkpoint is expected; ``model_path`` applies the fallback.
+    configured_model_path: Path = BASE_DIR / "models" / MODEL_FILE_NAME
     processing_dir: Path = BASE_DIR / "processing"
 
     # --- authentication --------------------------------------------------
@@ -90,7 +188,9 @@ class Settings:
     # "scale_255": x / 255.   "imagenet": (x / 255 - mean) / std.
     normalization: str = "scale_255"
     polygonize_chunk: int = 4096
-    sieve_min_pixels: int = 8
+    # None: derived per raster from the minimum mapping unit
+    # (sliver_area_m2 / true ground area of one pixel). An integer overrides.
+    sieve_min_pixels: int | None = None
     sliver_area_m2: float = 1.0
     export_background: bool = False
     max_upload_mb: int = 4096
@@ -102,13 +202,36 @@ class Settings:
     built_cluster_buffer_m: float = 3.0
 
     # --- derived paths ---------------------------------------------------
+    # The three required files are resolved on every access (one directory
+    # listing), so a file copied in while the server runs is picked up. When
+    # nothing usable is found the expected path is returned; it does not
+    # exist, so callers report the file as unavailable.
+    @property
+    def parcels_resolution(self) -> FileResolution:
+        return resolve_file(self.data_dir / "parcels" / PARCELS_FILE_NAME)
+
+    @property
+    def landcover_resolution(self) -> FileResolution:
+        return resolve_file(self.data_dir / "landcover" / LANDCOVER_FILE_NAME)
+
+    @property
+    def model_resolution(self) -> FileResolution:
+        return resolve_file(self.configured_model_path)
+
     @property
     def parcels_file(self) -> Path:
-        return self.data_dir / "parcels" / "candidate_parcels.geojson"
+        resolution = self.parcels_resolution
+        return resolution.path or resolution.expected
 
     @property
     def landcover_file(self) -> Path:
-        return self.data_dir / "landcover" / "uplarshi_landcover_with_attributes.geojson"
+        resolution = self.landcover_resolution
+        return resolution.path or resolution.expected
+
+    @property
+    def model_path(self) -> Path:
+        resolution = self.model_resolution
+        return resolution.path or resolution.expected
 
     @property
     def assignments_file(self) -> Path:
@@ -143,10 +266,7 @@ class Settings:
 def load_settings() -> Settings:
     data_dir = Path(os.getenv("CADASTRA_DATA_DIR") or (BASE_DIR / "data"))
     processing_dir = Path(os.getenv("CADASTRA_PROCESSING_DIR") or (BASE_DIR / "processing"))
-    model_path = Path(
-        os.getenv("CADASTRA_MODEL_PATH")
-        or (BASE_DIR / "models" / "best_weighted_multiclass_unet.pth")
-    )
+    model_path = Path(os.getenv("CADASTRA_MODEL_PATH") or (BASE_DIR / "models" / MODEL_FILE_NAME))
 
     frontend_url = os.getenv("FRONTEND_URL", "").strip()
     default_origins = [
@@ -168,7 +288,7 @@ def load_settings() -> Settings:
 
     return Settings(
         data_dir=data_dir,
-        model_path=model_path,
+        configured_model_path=model_path,
         processing_dir=processing_dir,
         supabase_url=os.getenv("SUPABASE_URL", "").strip().rstrip("/"),
         supabase_key=os.getenv("SUPABASE_KEY", "").strip(),
@@ -180,7 +300,7 @@ def load_settings() -> Settings:
         tile_overlap=_int("TILE_OVERLAP", 64),
         normalization=normalization,
         polygonize_chunk=_int("POLYGONIZE_CHUNK", 4096),
-        sieve_min_pixels=_int("SIEVE_MIN_PIXELS", 8),
+        sieve_min_pixels=(_int("SIEVE_MIN_PIXELS", 0) or None) if os.getenv("SIEVE_MIN_PIXELS") else None,
         sliver_area_m2=_float("SLIVER_AREA_M2", 1.0),
         export_background=_bool("EXPORT_BACKGROUND", False),
         max_upload_mb=_int("MAX_UPLOAD_MB", 4096),

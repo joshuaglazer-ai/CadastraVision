@@ -19,7 +19,29 @@ unknown source is a `404`.
 | --- | --- | --- |
 | GET | `/health` | `{status, service, version}`. Public. |
 | GET | `/` | Name, tagline and principle. Public. |
-| GET | `/api/system/status` | Model status (checkpoint present, runtime available, normalisation), pipeline settings, indexed layers, indexing progress and errors, available sources |
+| GET | `/api/system/status` | Model status (checkpoint present, runtime available, normalisation), pipeline settings, indexed layers, indexing progress and errors, `data_files`, available sources |
+
+`data_files` says, for each required file (`parcels`, `landcover`, `model`), how it was
+found. The same entry for the checkpoint is repeated as `model.checkpoint_file_status`.
+
+```json
+{
+  "status": "ambiguous",
+  "expected": "backend/data/parcels/candidate_parcels.geojson",
+  "used": null,
+  "candidates": ["candidate_parcels (1).geojson", "candidate_parcels (2).geojson"],
+  "message": "Several .geojson files in backend/data/parcels/ (...) and none is named candidate_parcels.geojson. Keep one, or rename the right one to candidate_parcels.geojson."
+}
+```
+
+| `status` | Meaning |
+| --- | --- |
+| `found` | The file exists under its expected name (`message` is null) |
+| `fallback` | The expected name is absent and the folder holds exactly one file of that type, which is used (`used` names it) |
+| `ambiguous` | Several files of that type and none under the expected name; none is used, the layer or model is unavailable |
+| `missing` | No file of that type in the folder |
+
+Paths are given relative to the repository, never as server paths.
 
 ## Surveyor and assignment
 
@@ -29,14 +51,62 @@ unknown source is a `404`.
 | GET | `/api/assignments/current` | The assignment, or `404` with the reason |
 | GET | `/api/assignments/current/boundary` | Assigned boundary as a GeoJSON FeatureCollection |
 
-`assignment` carries `assignment_id`, `assignment_status`, `district`, `taluk`,
-`village`, `area_ha` (measured), `declared_area_ha`, `bbox`, `is_demo` and `label`.
+`assignment` is the account's **current area**. It carries `assignment_id`, `name`,
+`assignment_status`, `state`, `district`, `taluk`, `village`, `area_m2` and `area_ha`
+(measured), `declared_area_ha`, `bbox`, `is_demo`, `kind` (`registry`, `work_area` or
+`demo`), `is_official`, `editable` and `label`:
+
+| `label` | Meaning |
+| --- | --- |
+| `ASSIGNED` | From the assignment registry, for this e-mail |
+| `SELF-DECLARED WORK AREA` | Drawn or uploaded by the surveyor; not an official assignment |
+| `DEMO ASSIGNMENT` | The registry's demo entry, shown only when `CADASTRA_ALLOW_DEMO_ASSIGNMENT=true` |
+
+`surveyor` carries `govt_surveyor_id` (from the account's Supabase profile, or null),
+`govt_surveyor_id_status` (`SELF-DECLARED` when present; it is not checked against any
+register) and `profile_complete`.
+
+### Work areas
+
+The owner of a work area is always the signed-in account. Nothing in a request names
+it, and an owner field in a request body is ignored.
+
+| Method | Path | Body / returns |
+| --- | --- | --- |
+| GET | `/api/assignments` | `{items, current, current_id, notes, registry_error, limits}`. `items` lists the registry assignments for this e-mail, then the account's own work areas, each with `geometry`, `notes` and `is_current`. |
+| POST | `/api/assignments/measure` | `{boundary}` → `{geometry, area_m2, area_ha, perimeter_m, metric_crs, vertices, notes}`. Checks and measures without saving. |
+| POST | `/api/assignments` | `{name, state?, district?, taluk?, village?, origin, boundary, activate?}` → the new work area (`201`). `activate` defaults to true. |
+| PATCH | `/api/assignments/{id}` | Any of `name`, `state`, `district`, `taluk`, `village`, `boundary`, `origin`, `reason` |
+| DELETE | `/api/assignments/{id}` | `{deleted, was_active}` |
+| POST | `/api/assignments/{id}/activate` | Makes one of the account's work areas, or one of its registry assignments, the current area |
+
+- `boundary` is a GeoJSON Polygon or MultiPolygon, a Feature, or a FeatureCollection
+  holding exactly one polygon feature. A `crs` member is honoured and the geometry is
+  reprojected to longitude/latitude; without one, longitude/latitude is assumed.
+- The area is measured by the server in the local UTM zone. An area sent by the client
+  is ignored.
+- Rejected with `400` and the reason: anything that is not one polygon, malformed or
+  unclosed-and-unfixable rings, self-intersecting outlines, outlines whose points lie
+  on a line, areas under 1 m² or over 1,000 km², more than 20,000 vertices, a CRS that
+  cannot be used, text fields over 120 characters, an empty name, an `origin` other than
+  `drawn` or `uploaded`.
+- Registry assignments are read-only: PATCH and DELETE on them return `404`. Another
+  account's work area returns `404` for every method, the same answer as for an id that
+  does not exist.
+- Every create, update, delete and activate is written to the audit log
+  (`entity_type` `work_area`, actions `work_area.create`, `work_area.update`,
+  `work_area.delete`, `work_area.activate`; choosing a registry assignment is
+  `assignment.activate`), with the before and after values.
+
+The current area decides the boundary on the map, the bounding box every map and
+analytics query is filtered to, and the `assignment_id` recorded on new processing jobs,
+reviews and export metadata.
 
 ## Datasets
 
 | Method | Path | Notes |
 | --- | --- | --- |
-| GET | `/api/datasets` | Ten source categories, each with `status`, `datasets` and an `empty_message` when nothing is present |
+| GET | `/api/datasets` | Ten source categories, each with `status`, `datasets`, `notes` and an `empty_message` when nothing is present. A missing or ambiguous existing layer is explained in the `ai_layers` category's `notes`. |
 | POST | `/api/datasets/upload` | Multipart: `source_type`, `file`. Extension must suit the category. |
 | GET | `/api/datasets/{dataset_id}` | One dataset |
 | GET | `/api/datasets/{dataset_id}/overlay` | A reference GeoJSON layer in longitude/latitude; each feature's `id` is its position in the file |
@@ -52,13 +122,19 @@ the file.
 
 | Method | Path | Parameters |
 | --- | --- | --- |
-| GET | `/api/map/layers` | Layer catalogue: availability, counts, and the reason a layer is unavailable (for example "DSM dataset unavailable") |
+| GET | `/api/map/layers` | Layer catalogue: availability, counts, the reason a layer is unavailable, and `data_files` (as in the system status; null for a job source) |
 | GET | `/api/map/assigned-area` | Assigned boundary plus `available` and `notes` |
 | GET | `/api/map/parcels` | `bbox`, `zoom`, `limit` |
 | GET | `/api/map/features` | `classes` (comma separated), `bbox`, `zoom`, `limit` |
 | GET | `/api/map/gnss` | GNSS points and recorded ground-truth positions |
 | GET | `/api/map/features/{uid}` | `geometry` = `overview` or `detail`, `reasoning` = true or false |
 | GET | `/api/parcels/{parcel_id}` | A candidate parcel with reasoning |
+
+An unavailable layer's `message` names the file or folder it needs, for example
+"Expected file backend/data/parcels/candidate_parcels.geojson is missing. Place the file
+there under that name." or "DSM dataset unavailable. Add a GeoTIFF to backend/data/dsm/."
+When a feature endpoint is asked for a layer that does not exist, it returns an empty
+collection with `available: false` and the same message.
 
 `bbox` is `min_lon,min_lat,max_lon,max_lat`. The feature endpoints return a GeoJSON
 FeatureCollection with `total_matching`, `returned`, `truncated` and the level of detail

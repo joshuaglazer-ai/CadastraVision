@@ -1,8 +1,12 @@
 """Metric measurements and reprojection for generated features.
 
-Areas and lengths are never taken from geographic coordinates. A raster in
-a projected CRS with metre units is measured in that CRS; anything else is
-projected to the WGS 84 / UTM zone that contains it.
+Areas and lengths are never taken from geographic coordinates, nor from a
+Mercator projection. Web Mercator (EPSG:3857), the usual CRS of drone
+orthomosaics exported for web maps, has metre units but stretches every
+length by 1 / cos(latitude): at Uplarshi (28.56 N) areas come out 1.30 x too
+large. A raster in any other projected CRS with metre units (UTM, a national
+grid) is measured in that CRS; Mercator and geographic rasters are projected
+to the WGS 84 / UTM zone that contains them.
 
 Requires pyproj and Shapely (both come with GeoPandas / Rasterio).
 """
@@ -25,13 +29,26 @@ def _pyproj_crs(crs):
     return CRS.from_user_input(crs)
 
 
+def is_mercator(crs) -> bool:
+    """True for (Pseudo-)Mercator projections, whose scale varies with
+    latitude. Transverse Mercator (UTM) is not included."""
+
+    source = _pyproj_crs(crs)
+    if not source.is_projected:
+        return False
+    operation = source.coordinate_operation
+    method = (operation.method_name if operation is not None else "") or ""
+    method = method.lower()
+    return "mercator" in method and "transverse" not in method
+
+
 def choose_metric_crs(crs, bounds) -> Any:
     """Return a pyproj CRS suitable for measuring ``bounds`` (in ``crs``)."""
 
     from pyproj import CRS, Transformer
 
     source = _pyproj_crs(crs)
-    if source.is_projected:
+    if source.is_projected and not is_mercator(source):
         unit = (source.axis_info[0].unit_name or "").lower()
         if unit in ("metre", "meter"):
             return source
@@ -44,6 +61,40 @@ def choose_metric_crs(crs, bounds) -> Any:
         raise ValueError("The raster extent could not be located on the globe.")
     zone, northern = utm_zone(lon, lat)
     return CRS.from_epsg(utm_epsg(zone, northern))
+
+
+def pixel_ground_size(crs, transform, width: int, height: int) -> dict[str, Any]:
+    """True ground size of the raster's centre pixel, measured in the CRS
+    ``choose_metric_crs`` picks (the local UTM zone for Mercator or
+    geographic rasters). Returns ``{"x_m", "y_m", "area_m2", "metric_crs"}``.
+    """
+
+    from pyproj import Transformer
+    from shapely.geometry import Polygon
+
+    col, row = width / 2.0, height / 2.0
+    corners = [
+        (transform.c + transform.a * (col + dx) + transform.b * (row + dy),
+         transform.f + transform.d * (col + dx) + transform.e * (row + dy))
+        for dx, dy in ((0, 0), (1, 0), (1, 1), (0, 1))
+    ]
+    xs = [c[0] for c in corners]
+    ys = [c[1] for c in corners]
+    metric = choose_metric_crs(crs, (min(xs), min(ys), max(xs), max(ys)))
+    source = _pyproj_crs(crs)
+    if source == metric:
+        projected = corners
+    else:
+        to_metric = Transformer.from_crs(source, metric, always_xy=True)
+        projected = [to_metric.transform(x, y) for x, y in corners]
+    pixel = Polygon(projected)
+    (x0, y0), (x1, y1), _, (x3, y3) = projected
+    return {
+        "x_m": math.hypot(x1 - x0, y1 - y0),
+        "y_m": math.hypot(x3 - x0, y3 - y0),
+        "area_m2": float(pixel.area),
+        "metric_crs": crs_label(metric),
+    }
 
 
 def transformer(source, target) -> Callable:

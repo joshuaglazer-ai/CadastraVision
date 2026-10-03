@@ -35,6 +35,9 @@ class AuthUser:
     email: str
     name: str | None = None
     is_dev: bool = False
+    # Entered by the surveyor and kept in their Supabase profile
+    # (user_metadata). Nothing checks it against a government register.
+    govt_surveyor_id: str | None = None
 
 
 UserFetcher = Callable[[str, str, str], dict]
@@ -107,8 +110,9 @@ def verify_token(
 
     metadata = payload.get("user_metadata") or {}
     name = metadata.get("full_name") or metadata.get("name") or None
+    govt_id = str(metadata.get("govt_surveyor_id") or "").strip() or None
 
-    user = AuthUser(user_id=str(user_id), email=email, name=name)
+    user = AuthUser(user_id=str(user_id), email=email, name=name, govt_surveyor_id=govt_id)
     with _cache_lock:
         if len(_cache) > 2048:
             _cache.clear()

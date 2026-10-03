@@ -1,3 +1,4 @@
+import { Fragment } from "react";
 import { useWorkspace } from "../context/WorkspaceContext";
 import AssignmentBar from "./AssignmentBar";
 import Navbar from "./Navbar";
@@ -5,7 +6,7 @@ import { ErrorState, LoadingState } from "./States";
 
 /** Frame of every signed-in page: navigation, assignment context, content. */
 export default function AppShell({ children }) {
-  const { loading, error, reload, surveyor } = useWorkspace();
+  const { loading, error, reload, surveyor, assignment } = useWorkspace();
 
   return (
     <div className="app-shell">
@@ -29,7 +30,9 @@ export default function AppShell({ children }) {
       ) : (
         <>
           <AssignmentBar />
-          {children}
+          {/* Switching area remounts the page, so its map, figures, review
+              queue and analytics are fetched again for the new area. */}
+          <Fragment key={assignment?.assignment_id || "no-area"}>{children}</Fragment>
         </>
       )}
     </div>

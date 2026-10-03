@@ -423,12 +423,20 @@ def discover(settings: Settings, store: Store, surveyor_id: str | None = None) -
 
         if source["key"] == "ai_layers":
             existing = runtime.ensure_source(runtime.EXISTING_SOURCE)
+            files = runtime.data_files()
             names = {"parcels": "Candidate parcels", "landcover": "Land-cover features"}
             for kind, layer in existing.items():
                 if layer:
-                    datasets.append(_layer_entry(layer, "ai_layers", "Existing project layer", names[kind]))
+                    entry = _layer_entry(layer, "ai_layers", "Existing project layer", names[kind])
+                    if files[kind]["status"] == "fallback":
+                        entry["notes"].insert(0, files[kind]["message"])
+                    datasets.append(entry)
+                else:
+                    # Say which file is expected and where, not only "unavailable".
+                    notes.append(f"{names[kind]}: {runtime.unavailable_reason(kind)}")
             for key, message in runtime.bootstrap_errors().items():
-                notes.append(f"{key.split('|')[-1]}: {message}")
+                if not key.startswith(f"{runtime.EXISTING_SOURCE}|"):
+                    notes.append(f"{key.split('|')[-1]}: {message}")
             for job in jobs:
                 if job["status"] != "COMPLETED":
                     continue

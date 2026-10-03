@@ -5,6 +5,7 @@ import DisclaimerBanner from "../../components/DisclaimerBanner";
 import Icon from "../../components/Icon";
 import { EmptyState, Unavailable } from "../../components/States";
 import { Tag } from "../../components/StatusBadge";
+import WorkAreasPanel, { AreaLabel } from "../../components/WorkAreasPanel";
 import { useWorkspace } from "../../context/WorkspaceContext";
 import { getAnalytics, getDatasets } from "../../lib/api";
 import { formatArea, formatDate, formatLength, formatNumber, formatPercent, titleCase } from "../../lib/format";
@@ -68,7 +69,18 @@ export default function Assignment() {
             <dl className="kv">
               <dt>Name</dt>
               <dd>{surveyor?.name}</dd>
-              <dt>Surveyor ID</dt>
+              <dt>Government surveyor ID</dt>
+              <dd>
+                {surveyor?.govt_surveyor_id ? (
+                  <>
+                    <span className="mono">{surveyor.govt_surveyor_id}</span>{" "}
+                    <Tag tone="review">Self-declared, not verified</Tag>
+                  </>
+                ) : (
+                  <Unavailable>Not entered</Unavailable>
+                )}
+              </dd>
+              <dt>Account ID</dt>
               <dd className="mono">{surveyor?.surveyor_id}</dd>
               <dt>Account</dt>
               <dd>{surveyor?.email}</dd>
@@ -83,15 +95,15 @@ export default function Assignment() {
 
         <section className="panel">
           <div className="panel__head">
-            <h3>Assigned area</h3>
-            {assignment ? (
-              assignment.is_demo ? <Tag tone="demo" icon="alert">Demo assignment</Tag> : <Tag tone="verified">Assigned</Tag>
-            ) : null}
+            <h3>Current area</h3>
+            {assignment ? <AreaLabel label={assignment.label} /> : null}
           </div>
           <div className="panel__body">
             {assignment ? (
               <dl className="kv">
-                <dt>Assignment ID</dt>
+                <dt>Name</dt>
+                <dd>{value(assignment.name)}</dd>
+                <dt>{assignment.kind === "work_area" ? "Work area ID" : "Assignment ID"}</dt>
                 <dd className="mono">{assignment.assignment_id}</dd>
                 <dt>Status</dt>
                 <dd>{titleCase(assignment.assignment_status)}</dd>
@@ -124,18 +136,20 @@ export default function Assignment() {
               <EmptyState
                 compact
                 icon="target"
-                title="No assignment for this account"
-                detail="Requires administrator input: add this account's e-mail to an assignment in the registry."
+                title="No work area yet. Add one to begin."
+                detail="Add a work area below, or ask an administrator to register an assignment for this account."
               />
             )}
           </div>
         </section>
       </div>
 
+      <WorkAreasPanel />
+
       {notes?.length ? (
         <section className="panel">
           <div className="panel__head">
-            <h3>Things to know about this assignment</h3>
+            <h3>Things to know about this area</h3>
           </div>
           <div className="panel__body">
             <ul className="reason-list">
@@ -203,7 +217,13 @@ export default function Assignment() {
                   <dt>Classes</dt>
                   <dd>{model.classes.map((item) => item.name).join(", ")}</dd>
                   <dt>Checkpoint</dt>
-                  <dd>{model.checkpoint_present ? model.checkpoint_file : <Unavailable>Not found on the server</Unavailable>}</dd>
+                  <dd>
+                    {model.checkpoint_present ? (
+                      model.checkpoint_file
+                    ) : (
+                      <Unavailable>{model.checkpoint_file_status?.message || "Not found on the server"}</Unavailable>
+                    )}
+                  </dd>
                   <dt>Training data</dt>
                   <dd>{model.training_data}</dd>
                 </dl>

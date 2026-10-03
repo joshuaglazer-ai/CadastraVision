@@ -82,6 +82,34 @@ CREATE TABLE IF NOT EXISTS datasets (
     surveyor_id TEXT,
     created_at  TEXT NOT NULL
 );
+
+-- Work areas a surveyor declares for themselves (drawn or uploaded in the
+-- app). They are not official assignments; those live in the registry file.
+CREATE TABLE IF NOT EXISTS work_areas (
+    area_id           TEXT PRIMARY KEY,
+    owner_email       TEXT NOT NULL,
+    owner_surveyor_id TEXT NOT NULL,
+    name              TEXT NOT NULL,
+    state             TEXT,
+    district          TEXT,
+    taluk             TEXT,
+    village           TEXT,
+    geometry_json     TEXT NOT NULL,
+    area_m2           REAL NOT NULL,
+    origin            TEXT NOT NULL CHECK (origin IN ('drawn', 'uploaded')),
+    is_active         INTEGER NOT NULL DEFAULT 0,
+    created_at        TEXT NOT NULL,
+    updated_at        TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_work_areas_owner ON work_areas (owner_email, created_at);
+
+-- Which registry assignment a user chose, when they hold several and no
+-- work area is active.
+CREATE TABLE IF NOT EXISTS assignment_preferences (
+    owner_email   TEXT PRIMARY KEY,
+    assignment_id TEXT NOT NULL,
+    updated_at    TEXT NOT NULL
+);
 """
 
 # Action taken by the surveyor -> resulting verification status.
@@ -634,6 +662,142 @@ class Store:
             event["after"] = _loads(event.pop("after_json", None))
             events.append(event)
         return events
+
+    # ------------------------------------------------------------ work areas
+    @staticmethod
+    def _work_area_row(row: sqlite3.Row | None) -> dict[str, Any] | None:
+        if row is None:
+            return None
+        area = dict(row)
+        area["geometry"] = _loads(area.pop("geometry_json", None))
+        area["is_active"] = bool(area["is_active"])
+        return area
+
+    def create_work_area(
+        self,
+        *,
+        owner_email: str,
+        owner_surveyor_id: str,
+        name: str,
+        geometry: dict[str, Any],
+        area_m2: float,
+        origin: str,
+        state: str | None = None,
+        district: str | None = None,
+        taluk: str | None = None,
+        village: str | None = None,
+    ) -> dict[str, Any]:
+        area_id = new_id("WA")
+        now = utc_now()
+        with self._lock, self._connect() as conn:
+            conn.execute(
+                """INSERT INTO work_areas (area_id, owner_email, owner_surveyor_id, name, state,
+                       district, taluk, village, geometry_json, area_m2, origin, is_active,
+                       created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)""",
+                (
+                    area_id,
+                    owner_email.lower(),
+                    owner_surveyor_id,
+                    name,
+                    state,
+                    district,
+                    taluk,
+                    village,
+                    _dumps(geometry),
+                    float(area_m2),
+                    origin,
+                    now,
+                    now,
+                ),
+            )
+        return self.get_work_area(area_id)  # type: ignore[return-value]
+
+    def get_work_area(self, area_id: str, owner_email: str | None = None) -> dict[str, Any] | None:
+        """One work area; with ``owner_email``, only if that account owns it."""
+
+        query = "SELECT * FROM work_areas WHERE area_id = ?"
+        params: list[Any] = [area_id]
+        if owner_email is not None:
+            query += " AND owner_email = ?"
+            params.append(owner_email.lower())
+        with self._connect() as conn:
+            row = conn.execute(query, params).fetchone()
+        return self._work_area_row(row)
+
+    def list_work_areas(self, owner_email: str) -> list[dict[str, Any]]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM work_areas WHERE owner_email = ? ORDER BY created_at, area_id",
+                (owner_email.lower(),),
+            ).fetchall()
+        return [self._work_area_row(row) for row in rows]  # type: ignore[misc]
+
+    def active_work_area(self, owner_email: str) -> dict[str, Any] | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM work_areas WHERE owner_email = ? AND is_active = 1 LIMIT 1",
+                (owner_email.lower(),),
+            ).fetchone()
+        return self._work_area_row(row)
+
+    _WORK_AREA_FIELDS = ("name", "state", "district", "taluk", "village", "geometry", "area_m2", "origin")
+
+    def update_work_area(self, area_id: str, owner_email: str, **fields: Any) -> dict[str, Any] | None:
+        updates = {key: value for key, value in fields.items() if key in self._WORK_AREA_FIELDS}
+        if "geometry" in updates:
+            updates["geometry_json"] = _dumps(updates.pop("geometry"))
+        updates["updated_at"] = utc_now()
+        assignments = ", ".join(f"{column} = ?" for column in updates)
+        with self._lock, self._connect() as conn:
+            conn.execute(
+                f"UPDATE work_areas SET {assignments} WHERE area_id = ? AND owner_email = ?",
+                [*updates.values(), area_id, owner_email.lower()],
+            )
+        return self.get_work_area(area_id, owner_email)
+
+    def delete_work_area(self, area_id: str, owner_email: str) -> bool:
+        with self._lock, self._connect() as conn:
+            cursor = conn.execute(
+                "DELETE FROM work_areas WHERE area_id = ? AND owner_email = ?",
+                (area_id, owner_email.lower()),
+            )
+        return cursor.rowcount > 0
+
+    def activate_work_area(self, area_id: str, owner_email: str) -> None:
+        """Make one work area current; every other area of the owner is not."""
+
+        owner = owner_email.lower()
+        now = utc_now()
+        with self._lock, self._connect() as conn:
+            conn.execute("UPDATE work_areas SET is_active = 0 WHERE owner_email = ?", (owner,))
+            conn.execute(
+                "UPDATE work_areas SET is_active = 1, updated_at = ? WHERE area_id = ? AND owner_email = ?",
+                (now, area_id, owner),
+            )
+            conn.execute("DELETE FROM assignment_preferences WHERE owner_email = ?", (owner,))
+
+    def prefer_registry_assignment(self, owner_email: str, assignment_id: str) -> None:
+        """Make a registry assignment current: no work area stays active."""
+
+        owner = owner_email.lower()
+        with self._lock, self._connect() as conn:
+            conn.execute("UPDATE work_areas SET is_active = 0 WHERE owner_email = ?", (owner,))
+            conn.execute(
+                """INSERT INTO assignment_preferences (owner_email, assignment_id, updated_at)
+                   VALUES (?, ?, ?)
+                   ON CONFLICT(owner_email) DO UPDATE SET
+                       assignment_id = excluded.assignment_id, updated_at = excluded.updated_at""",
+                (owner, assignment_id, utc_now()),
+            )
+
+    def preferred_registry_assignment(self, owner_email: str) -> str | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT assignment_id FROM assignment_preferences WHERE owner_email = ?",
+                (owner_email.lower(),),
+            ).fetchone()
+        return row["assignment_id"] if row else None
 
     # -------------------------------------------------------------- datasets
     @staticmethod

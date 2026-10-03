@@ -141,7 +141,27 @@ def inspect_raster(path: Path | str) -> dict[str, Any]:
             ),
             "block_shapes": [list(shape) for shape in src.block_shapes[:1]],
             "pixels": int(src.width) * int(src.height),
+            "crs_is_mercator": False,
+            "pixel_ground_area_m2": None,
+            "measurement_crs": None,
         }
+
+        # The true ground size of a pixel, measured in the CRS areas are
+        # measured in. A Mercator CRS has metre units but its metres are not
+        # ground metres (scale 1 / cos(latitude)), so the unit size alone
+        # would overstate the pixel.
+        if crs is not None:
+            try:
+                from backend.gis.metric import is_mercator, pixel_ground_size
+
+                ground = pixel_ground_size(crs, transform, src.width, src.height)
+                meta["crs_is_mercator"] = is_mercator(crs)
+                meta["resolution_m"] = [round(ground["x_m"], 5), round(ground["y_m"], 5)]
+                meta["pixel_ground_area_m2"] = ground["area_m2"]
+                meta["measurement_crs"] = ground["metric_crs"]
+            except Exception:  # pyproj missing or an unusual CRS: keep the unit-based estimate
+                if meta["resolution_m"]:
+                    meta["pixel_ground_area_m2"] = meta["resolution_m"][0] * meta["resolution_m"][1]
     return meta
 
 
@@ -202,6 +222,12 @@ def validate_for_inference(meta: dict[str, Any]) -> dict[str, list[str]]:
         warnings.append(
             "The raster uses a geographic CRS; areas and lengths are computed after "
             "projecting to the local UTM zone."
+        )
+    if meta.get("crs_is_mercator"):
+        warnings.append(
+            "The raster uses a Mercator CRS (for example Web Mercator), whose metres are not "
+            "ground metres; areas and lengths are computed after projecting to "
+            f"{meta.get('measurement_crs') or 'the local UTM zone'}."
         )
 
     return {"errors": errors, "warnings": warnings}

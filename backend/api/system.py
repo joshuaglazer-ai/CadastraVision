@@ -39,11 +39,14 @@ def system_status(
     """Model availability, layer indexing state and configuration."""
 
     layers = runtime.get_layers()
+    files = runtime.data_files()
+    model = model_status(settings.model_path, settings.normalization)
+    model["checkpoint_file_status"] = files["model"]
     return {
         "version": API_VERSION,
         "auth_mode": settings.auth_mode,
         "dev_session": bool(context.surveyor.get("is_dev_session")),
-        "model": model_status(settings.model_path, settings.normalization),
+        "model": model,
         "pipeline": {
             "tile_size": settings.tile_size,
             "tile_overlap": settings.tile_overlap,
@@ -57,6 +60,8 @@ def system_status(
         "layers": layers.layers(),
         "indexing": layers.progress(),
         "indexing_errors": runtime.bootstrap_errors(),
+        # Which file each required input was read from, or why none was.
+        "data_files": files,
         "sources": runtime.known_sources(store),
         "disclaimer": DISCLAIMER,
     }
