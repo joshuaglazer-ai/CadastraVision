@@ -30,7 +30,7 @@ jobs:
       - name: Install dependencies (CPU build of PyTorch)
         run: |
           python -m pip install --upgrade pip
-          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
           pip install -r backend/requirements-dev.txt
       # The trained checkpoint and the survey layers are not stored in git.
       # Tests that need the checkpoint are skipped; the model architecture is
@@ -113,8 +113,10 @@ jobs:
         run: |
           python3 -m venv .venv
           source .venv/bin/activate
-          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
           pip install -r backend/requirements.txt
+          # Not a README step: fails if PyTorch and torchvision do not match.
+          python -c "import torch, segmentation_models_pytorch; print('model libraries import')"
           cp backend/.env.example backend/.env
           python -m backend.scripts.selfcheck || echo "selfcheck exited $? (expected: no checkpoint in CI)"
           uvicorn backend.main:app --port 8000 &

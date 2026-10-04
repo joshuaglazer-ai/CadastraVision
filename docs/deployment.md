@@ -15,8 +15,8 @@ automatically when the CUDA build of PyTorch is installed.
 ## Backend
 
 ```bash
-python -m venv .venv && source .venv/bin/activate
-pip install torch --index-url https://download.pytorch.org/whl/cpu   # or the CUDA build
+python3 -m venv .venv && source .venv/bin/activate   # Windows: python -m venv .venv, then .venv\Scripts\activate
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu   # or the CUDA build
 pip install -r backend/requirements.txt
 cp backend/.env.example backend/.env
 python -m backend.scripts.prepare_data --from ~/Downloads   # copy the three required files in
