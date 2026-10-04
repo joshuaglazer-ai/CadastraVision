@@ -2,6 +2,8 @@ import { useState } from "react";
 import { CLASS_STYLE } from "../lib/constants";
 import { formatNumber } from "../lib/format";
 import Icon from "./Icon";
+import NoImageryState from "./NoImageryState";
+import { noFeaturesInArea } from "../lib/emptyArea";
 
 function Swatch({ layerKey }) {
   if (layerKey === "assigned_area") {
@@ -71,6 +73,7 @@ export default function LayerControl({ catalog, visible, onToggle, defaultOpen =
 
       {open ? (
         <div className="layer-control__body">
+          {noFeaturesInArea(catalog) ? <NoImageryState compact /> : null}
           {groups.map((group) => (
             <div key={group.name}>
               <div className="layer-group">{group.name}</div>

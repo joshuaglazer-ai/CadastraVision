@@ -256,6 +256,22 @@ def feature_detail(
     return detail
 
 
+def features_in_area(context: SurveyorContext, source: str) -> int:
+    """All features of ``source`` (parcels and land cover, fragments included)
+    within the current area. Zero means nothing has been processed here, which
+    the interface must not present as "checked and nothing found"."""
+
+    layers = runtime.get_layers()
+    runtime.ensure_source(source)
+    total = 0
+    for kind in ("parcels", "landcover"):
+        if layers.layer(source, kind) is None:
+            continue
+        _, count = layers.query(source, kind, bbox=context.bbox, geometry="none", limit=0)
+        total += count
+    return total
+
+
 def layer_catalog(
     context: SurveyorContext, settings: Settings, store: Store, source: str
 ) -> dict[str, Any]:
@@ -407,4 +423,5 @@ def layer_catalog(
         "class_order": [CLASS_KEYS[i] for i in sorted(CLASS_KEYS)],
         "indexing_errors": runtime.bootstrap_errors(),
         "data_files": runtime.data_files() if source == runtime.EXISTING_SOURCE else None,
+        "features_in_area": features_in_area(context, source),
     }

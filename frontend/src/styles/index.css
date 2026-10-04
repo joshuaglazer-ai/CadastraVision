@@ -2733,3 +2733,16 @@ textarea {
 .oauth__google {
   gap: 10px;
 }
+
+/* ---- No imagery processed for the area -------------------------------- */
+.layer-control__body .no-imagery {
+  margin: 4px 0 10px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(4, 22, 37, 0.6);
+}
+
+.layer-control__body .no-imagery .state__detail {
+  font-size: 0.82rem;
+}

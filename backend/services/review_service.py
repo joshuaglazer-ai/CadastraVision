@@ -212,6 +212,9 @@ def queue(
         "fragments_hidden": fragments_hidden,
         "include_fragments": include_fragments,
         "reviewed_features": len(reviewed_uids),
+        # Zero: nothing has been processed in this area for this source, as
+        # opposed to features that exist but sit in other groups.
+        "features_in_area": map_service.features_in_area(context, source),
         "note": (
             "Priority comes from model-derived uncertainty and geometry checks. "
             "It ranks features for attention; it is not proof that a feature is wrong."

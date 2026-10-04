@@ -229,6 +229,7 @@ def overview(
         "data_share_of_assignment": (
             round(extent_area / assignment_area, 4) if extent_area and assignment_area else None
         ),
+        "features_in_area": review_queue["features_in_area"],
         "review": {
             "counts": review_queue["counts"],
             "review_required": review_queue["review_required"],

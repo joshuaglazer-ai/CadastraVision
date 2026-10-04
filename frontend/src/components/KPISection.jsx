@@ -1,6 +1,8 @@
 import { formatArea, formatNumber, isNumber } from "../lib/format";
 import Icon from "./Icon";
 import { Unavailable } from "./States";
+import NoImageryState from "./NoImageryState";
+import { noFeaturesInArea } from "../lib/emptyArea";
 
 function Kpi({ icon, label, value, note, alert = false, text = false }) {
   return (
@@ -26,6 +28,17 @@ export default function KPISection({ analytics }) {
   const parcels = a.parcels;
   const review = a.review;
   const processing = a.processing;
+
+  // Zeros here would read as a surveyed area with nothing in it.
+  if (noFeaturesInArea(analytics)) {
+    return (
+      <section className="panel" aria-label="Key figures">
+        <div className="panel__body">
+          <NoImageryState />
+        </div>
+      </section>
+    );
+  }
 
   return (
     <section className="kpi-grid" aria-label="Key figures">

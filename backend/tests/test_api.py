@@ -534,3 +534,28 @@ class GeoPackageExportTests(ApiCase):
         self.assertIn("processing_job", " ".join(meta))  # null for the existing layers, a job id for job sources
         self.assertIn("not legal cadastral", description)
         self.assertEqual(count, len(support.PARCELS))
+
+
+class NoImageryInAreaTests(ApiCase):
+    """An area with no features is reported as such, not as "nothing high priority"."""
+
+    def test_area_without_features_reports_zero_everywhere(self):
+        far_away = support.rect(50000, 50000, 200, 200)  # 50 km from the fixture data
+        created = self.client.post(
+            "/api/assignments", json={"name": "Elsewhere", "origin": "drawn", "boundary": far_away}
+        )
+        self.assertEqual(created.status_code, 201, created.text)
+
+        queue = self.ok("/api/reviews/queue", group="high")
+        self.assertEqual(queue["features_in_area"], 0)
+        self.assertEqual(queue["items"], [])
+        self.assertEqual(self.ok("/api/analytics")["features_in_area"], 0)
+        self.assertEqual(self.ok("/api/map/layers")["features_in_area"], 0)
+
+    def test_area_with_features_keeps_the_priority_groups(self):
+        queue = self.ok("/api/reviews/queue", group="high")
+        self.assertGreater(queue["features_in_area"], 0)
+        self.assertEqual(self.ok("/api/analytics")["features_in_area"], queue["features_in_area"])
+        self.assertEqual(self.ok("/api/map/layers")["features_in_area"], queue["features_in_area"])
+        # Features exist, so an empty group means "none at this priority".
+        self.assertGreater(sum(queue["counts"][k] for k in ("high", "medium", "low")), 0)

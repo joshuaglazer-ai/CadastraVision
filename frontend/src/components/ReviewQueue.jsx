@@ -4,6 +4,8 @@ import { formatArea, formatDate, formatNumber } from "../lib/format";
 import Icon from "./Icon";
 import { EmptyState, ErrorState, LoadingState } from "./States";
 import StatusBadge from "./StatusBadge";
+import NoImageryState from "./NoImageryState";
+import { queueEmptyMessage } from "../lib/emptyArea";
 
 const GROUPS = [
   { key: "high", label: "High priority" },
@@ -13,13 +15,6 @@ const GROUPS = [
   { key: "flagged", label: "Flagged" },
 ];
 
-const EMPTY = {
-  high: ["Nothing at high priority", "No feature currently has low model confidence, high entropy or a serious geometry issue."],
-  medium: ["Nothing at medium priority", "No feature currently needs a second look."],
-  low: ["No low-priority features", "There are no remaining features to check."],
-  verified: ["Nothing verified yet", "Approve or edit a feature and it will be listed here."],
-  flagged: ["Nothing flagged", "Features you flag or reject are listed here."],
-};
 
 /**
  * The review queue. Choosing an item asks the map to zoom to the feature,
@@ -97,7 +92,16 @@ export default function ReviewQueue({ source, selectedId, onOpen, refreshKey = 0
         ) : state.loading && !data ? (
           <LoadingState compact label="Loading the review queue" />
         ) : items.length === 0 ? (
-          <EmptyState compact icon="check" title={EMPTY[group][0]} detail={EMPTY[group][1]} />
+          queueEmptyMessage(data, group)?.kind === "no-imagery" ? (
+            <NoImageryState compact />
+          ) : (
+            <EmptyState
+              compact
+              icon="check"
+              title={queueEmptyMessage(data, group)?.title}
+              detail={queueEmptyMessage(data, group)?.detail}
+            />
+          )
         ) : (
           <ul className="queue">
             {items.map((item) => (
