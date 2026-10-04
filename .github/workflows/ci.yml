@@ -50,6 +50,10 @@ jobs:
           failed = int(suite.get("failures")) + int(suite.get("errors"))
           print(f"::notice title=Backend tests (${{ matrix.os }})::{total} tests: "
                 f"{total - skipped - failed} passed, {skipped} skipped, {failed} failed")
+          from collections import Counter
+          reasons = Counter(s.get("message", "") for s in suite.iter("skipped"))
+          for reason, count in reasons.items():
+              print(f"::notice title=Skipped ({count})::{reason[:300]}")
           for case in ET.parse("pytest-report.xml").iter("testcase"):
               for bad in list(case.findall("failure")) + list(case.findall("error")):
                   text = (bad.get("message", "") + "\n" + (bad.text or ""))[-1800:]
