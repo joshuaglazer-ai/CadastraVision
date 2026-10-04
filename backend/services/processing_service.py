@@ -24,7 +24,7 @@ from backend.ai import pipeline
 from backend.ai.model import ModelLoadError
 from backend.config import Settings
 from backend.core import runtime
-from backend.core.store import Store
+from backend.core.store import Store, utc_now
 from backend.services import dataset_service
 from backend.services.assignment_service import SurveyorContext
 
@@ -192,14 +192,97 @@ def authorise(job: dict[str, Any] | None, context: SurveyorContext) -> dict[str,
     return job
 
 
+def area_check(
+    job: dict[str, Any], context: SurveyorContext, settings: Settings, store: Store
+) -> dict[str, Any]:
+    """Does the image cover the current area?
+
+    Compares the image footprint (its extent in longitude / latitude) with
+    the current area's boundary. When they do not meet, gives the geodesic
+    distance between them and the account's areas that the image does meet,
+    so the surveyor can switch area before processing.
+    """
+
+    from shapely.geometry import box, shape
+    from shapely.ops import nearest_points
+
+    from backend.services import work_area_service
+
+    bounds = (job.get("raster_meta") or {}).get("bounds_lonlat")
+    assignment = context.assignment or {}
+    result: dict[str, Any] = {
+        "area_id": assignment.get("assignment_id"),
+        "area_name": assignment.get("name") or assignment.get("village"),
+        "area_label": assignment.get("label"),
+        "image_bbox": bounds,
+        "intersects": None,
+        "distance_km": None,
+        "matching_areas": [],
+        "checked_at": utc_now(),
+    }
+    if not bounds:
+        result["message"] = "The image's location could not be read, so it was not checked against the area."
+        return result
+    image = box(*bounds)
+
+    for item in work_area_service.list_areas(context, settings, store)["items"]:
+        geometry = item.get("geometry")
+        if geometry and image.intersects(shape(geometry)):
+            result["matching_areas"].append(
+                {"assignment_id": item["assignment_id"], "name": item.get("name"), "label": item.get("label"),
+                 "is_current": item.get("is_current", False)}
+            )
+
+    if context.boundary is None:
+        result["message"] = "There is no current area to check the image against."
+        return result
+    area = shape(context.boundary)
+    result["intersects"] = bool(image.intersects(area))
+    if result["intersects"]:
+        result["message"] = "The image overlaps the current area."
+    else:
+        from pyproj import Geod
+
+        a, b = nearest_points(image, area)
+        _, _, metres = Geod(ellps="WGS84").inv(a.x, a.y, b.x, b.y)
+        result["distance_km"] = round(metres / 1000.0, 1)
+        result["message"] = (
+            f"The image lies outside {result['area_name'] or 'the current area'}, "
+            f"about {_rough_distance(result['distance_km'])} away."
+        )
+    return result
+
+
+def _rough_distance(km: float) -> str:
+    if km < 1:
+        return f"{km * 1000:,.0f} m"
+    if km < 20:
+        return f"{km:,.1f} km"
+    return f"{km:,.0f} km"
+
+
 def start(
-    context: SurveyorContext, settings: Settings, store: Store, job_id: str
+    context: SurveyorContext,
+    settings: Settings,
+    store: Store,
+    job_id: str,
+    *,
+    confirm_outside_area: bool = False,
 ) -> dict[str, Any]:
     job = authorise(store.get_job(job_id), context)
     if job["status"] in ("QUEUED", "PROCESSING", "COMPLETED"):
         return job
     if not Path(job["input_path"]).exists():
         raise ProcessingError("The input raster is no longer on the server. Upload it again.", 409)
+
+    # The job belongs to the area that is current when it starts.
+    check = area_check(job, context, settings, store)
+    if check["intersects"] is False and not confirm_outside_area:
+        raise ProcessingError(
+            check["message"] + " Switch to an area that covers the image, or confirm to process it anyway.",
+            409,
+        )
+    check["confirmed_outside_area"] = bool(check["intersects"] is False and confirm_outside_area)
 
     stages = pipeline.initial_stages()
     stages[0] = (job.get("stages") or stages)[0]
@@ -211,6 +294,8 @@ def start(
         stages=stages,
         error=None,
         summary=None,
+        assignment_id=context.assignment_id,
+        area_check=check,
     )
     store.add_audit(
         actor_id=context.surveyor_id,
@@ -218,6 +303,12 @@ def start(
         action="job.start",
         entity_type="job",
         entity_id=job_id,
+        after={
+            "assignment_id": context.assignment_id,
+            "image_intersects_area": check["intersects"],
+            "distance_km": check["distance_km"],
+        },
+        reason="Started although the image lies outside the area" if check["confirmed_outside_area"] else "",
     )
     with _running_lock:
         _running.add(job_id)

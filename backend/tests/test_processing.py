@@ -198,6 +198,71 @@ class LifecycleTests(ProcessingCase):
         self.assertEqual(self.client.post(f"/api/processing/{job['job_id']}/start").status_code, 409)
 
 
+class AreaCheckTests(ProcessingCase):
+    """Before a job starts, its image is checked against the current area."""
+
+    def run_to_end(self, job_id, **params):
+        with mock.patch.object(processing_service.pipeline, "run_pipeline", side_effect=fake_pipeline):
+            response = self.client.post(f"/api/processing/{job_id}/start", params=params or None)
+            if response.status_code == 200:
+                self.wait_for(job_id)
+        return response
+
+    def test_image_inside_the_area_starts_and_is_recorded(self):
+        job_id = self.create_job()["job_id"]
+        check = self.ok(f"/api/processing/{job_id}/area-check")
+        self.assertTrue(check["intersects"])
+        self.assertIsNone(check["distance_km"])
+        self.assertEqual(self.run_to_end(job_id).status_code, 200)
+        job = self.ok(f"/api/processing/{job_id}")
+        self.assertTrue(job["area_check"]["intersects"])
+        self.assertFalse(job["area_check"]["confirmed_outside_area"])
+        self.assertEqual(job["assignment_id"], "ASGN-TEST-DEMO")
+
+    def test_image_outside_the_area_needs_confirmation_and_is_recorded(self):
+        job_id = self.create_job()["job_id"]
+        # Switch to a work area 50 km away from the image.
+        far = self.client.post(
+            "/api/assignments",
+            json={"name": "Elsewhere", "origin": "drawn", "boundary": support.rect(50000, 50000, 200, 200)},
+        )
+        self.assertEqual(far.status_code, 201, far.text)
+        area_id = far.json()["assignment_id"]
+
+        check = self.ok(f"/api/processing/{job_id}/area-check")
+        self.assertFalse(check["intersects"])
+        self.assertGreater(check["distance_km"], 40)
+        self.assertLess(check["distance_km"], 90)
+        self.assertIn("lies outside Elsewhere", check["message"])
+        # The demo assignment covers the image, so switching to it is offered.
+        self.assertIn("ASGN-TEST-DEMO", [a["assignment_id"] for a in check["matching_areas"]])
+
+        refused = self.run_to_end(job_id)
+        self.assertEqual(refused.status_code, 409)
+        self.assertIn("outside", refused.json()["detail"])
+        self.assertEqual(self.ok(f"/api/processing/{job_id}")["status"], "UPLOADED")
+
+        self.assertEqual(self.run_to_end(job_id, confirm_outside_area="true").status_code, 200)
+        job = self.ok(f"/api/processing/{job_id}")
+        self.assertFalse(job["area_check"]["intersects"])
+        self.assertTrue(job["area_check"]["confirmed_outside_area"])
+        self.assertEqual(job["assignment_id"], area_id)
+        started = [e for e in self.ok("/api/audit")["events"] if e["action"] == "job.start"]
+        self.assertFalse(started[0]["after"]["image_intersects_area"])
+
+    def test_switching_area_before_starting_records_the_new_area(self):
+        job_id = self.create_job()["job_id"]
+        self.client.post(
+            "/api/assignments",
+            json={"name": "Elsewhere", "origin": "drawn", "boundary": support.rect(50000, 50000, 200, 200)},
+        )
+        self.assertEqual(self.client.post("/api/assignments/ASGN-TEST-DEMO/activate").status_code, 200)
+        self.assertEqual(self.run_to_end(job_id).status_code, 200)
+        job = self.ok(f"/api/processing/{job_id}")
+        self.assertTrue(job["area_check"]["intersects"])
+        self.assertEqual(job["assignment_id"], "ASGN-TEST-DEMO")
+
+
 class ProgressTests(unittest.TestCase):
     def test_progress_is_a_function_of_real_stage_state(self):
         stages = pipeline.initial_stages()

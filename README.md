@@ -255,6 +255,8 @@ gaps in the code:
   starting values, not calibrated against ground truth, so the ranking orders the
   review but is not a measure of error.
 
+- **18 fragments under 1 m² survive the sieve on the full image** (1.4 % of features): islands of valid pixels at the image's transparent margin with no neighbour large enough to merge into; a fix (stepped sieve) is kept on branch `stepped-sieve`, not in the submitted pipeline.
+
 ### Data that does not exist yet
 
 These follow from data that does not exist yet, not from missing code:

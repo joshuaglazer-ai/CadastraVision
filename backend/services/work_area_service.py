@@ -21,6 +21,7 @@ from backend.services.assignment_service import (
     SurveyorContext,
     describe_assignment,
     describe_work_area,
+    load_registry,
     registry_assignments_for,
 )
 
@@ -227,6 +228,14 @@ def list_areas(context: SurveyorContext, settings: Settings, store: Store) -> di
         items.append(assignment)
     for area in store.list_work_areas(context.email):
         items.append(_work_area_entry(area, current_id))
+    demo = _demo_feature(context, settings, registry)
+    if demo is not None:
+        # Listed so the account can return to it after using a work area.
+        assignment, boundary, notes = describe_assignment(demo, "demo")
+        assignment["is_current"] = assignment["assignment_id"] == current_id
+        assignment["notes"] = notes
+        assignment["geometry"] = boundary
+        items.append(assignment)
     return {
         "items": items,
         "current": context.assignment,
@@ -319,9 +328,19 @@ def delete_area(area_id: str, context: SurveyorContext, store: Store) -> dict[st
     return {"deleted": area_id, "was_active": before["is_active"]}
 
 
+def _demo_feature(context: SurveyorContext, settings: Settings, registry: list) -> dict[str, Any] | None:
+    """The registry's demo entry, when the account may fall back to it: demo
+    fallback is allowed and no registry assignment lists its e-mail."""
+
+    if not settings.allow_demo_assignment or registry:
+        return None
+    features, _ = load_registry(settings.assignments_file)
+    return next((f for f in features if (f.get("properties") or {}).get("is_demo")), None)
+
+
 def activate(assignment_id: str, context: SurveyorContext, settings: Settings, store: Store) -> dict[str, Any]:
-    """Make one of the account's own work areas, or one of its registry
-    assignments, the current area."""
+    """Make one of the account's own work areas, one of its registry
+    assignments, or (when allowed) the demo assignment the current area."""
 
     area = store.get_work_area(assignment_id, owner_email=context.email)
     if area is not None:
@@ -330,6 +349,18 @@ def activate(assignment_id: str, context: SurveyorContext, settings: Settings, s
         return {"activated": assignment_id, "kind": "work_area"}
 
     registry, _ = registry_assignments_for(context.email, settings)
+    demo = _demo_feature(context, settings, registry)
+    if demo is not None and str((demo.get("properties") or {}).get("assignment_id")) == assignment_id:
+        store.clear_area_choice(context.email)
+        store.add_audit(
+            actor_id=context.surveyor_id,
+            actor_email=context.email,
+            action="assignment.activate",
+            entity_type="assignment",
+            entity_id=assignment_id,
+            reason="Demo assignment made current",
+        )
+        return {"activated": assignment_id, "kind": "demo"}
     ids = {str((f.get("properties") or {}).get("assignment_id")) for f in registry}
     if assignment_id not in ids:
         raise WorkAreaError(f"Assignment '{assignment_id}' not found.", 404)

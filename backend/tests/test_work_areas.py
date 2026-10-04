@@ -206,7 +206,8 @@ class OwnershipAndAuditTests(StoreCase):
                 action()
             self.assertEqual(caught.exception.status_code, 404)
         self.assertEqual(self.store.get_work_area(area_id)["name"], "North fields")
-        self.assertEqual(work_area_service.list_areas(self.context(RAVI), settings, self.store)["items"], [])
+        listed = work_area_service.list_areas(self.context(RAVI), settings, self.store)["items"]
+        self.assertEqual([i for i in listed if i["kind"] != "demo"], [])
 
     def test_only_one_area_is_active_per_owner(self):
         first = work_area_service.create_area(area_payload(name="A"), self.context(RAVI), self.store)
@@ -271,8 +272,9 @@ class WorkAreaApiTests(ApiCase):
         self.assertEqual(self.store.get_work_area(area_id)["owner_email"], RAVI.email)
 
         listing = self.call("GET", "/api/assignments", "ravi").json()
-        self.assertEqual([i["assignment_id"] for i in listing["items"]], [area_id])
-        self.assertTrue(listing["items"][0]["is_current"])
+        own = [i for i in listing["items"] if i["kind"] != "demo"]
+        self.assertEqual([i["assignment_id"] for i in own], [area_id])
+        self.assertTrue(own[0]["is_current"])
 
         current = self.call("GET", "/api/assignments/current", "ravi").json()
         self.assertEqual(current["assignment"]["assignment_id"], area_id)
@@ -285,7 +287,8 @@ class WorkAreaApiTests(ApiCase):
 
         self.assertEqual(self.call("POST", f"/api/assignments/{area_id}/activate", "ravi").status_code, 200)
         self.assertEqual(self.call("DELETE", f"/api/assignments/{area_id}", "ravi").status_code, 200)
-        self.assertEqual(self.call("GET", "/api/assignments", "ravi").json()["items"], [])
+        left = self.call("GET", "/api/assignments", "ravi").json()["items"]
+        self.assertEqual([i["kind"] for i in left], ["demo"])
 
     def test_ownership_isolation(self):
         area_id = self.call("POST", "/api/assignments", "asha", json=area_payload()).json()["assignment_id"]
@@ -320,6 +323,22 @@ class WorkAreaApiTests(ApiCase):
         self.assertEqual(self.store.list_work_areas(RAVI.email), [])
         bad = self.call("POST", "/api/assignments/measure", "ravi", json={"boundary": None})
         self.assertEqual(bad.status_code, 400)
+
+    def test_switching_back_to_the_demo_assignment(self):
+        area_id = self.call("POST", "/api/assignments", "ravi", json=area_payload()).json()["assignment_id"]
+        listing = self.call("GET", "/api/assignments", "ravi").json()
+        demo = next(i for i in listing["items"] if i["kind"] == "demo")
+        self.assertEqual(demo["label"], "DEMO ASSIGNMENT")
+        self.assertFalse(demo["is_current"])
+        self.assertEqual(self.call("POST", f"/api/assignments/{demo['assignment_id']}/activate", "ravi").status_code, 200)
+        current = self.call("GET", "/api/assignments/current", "ravi").json()["assignment"]
+        self.assertTrue(current["is_demo"])
+        # The work area is kept, only no longer current.
+        self.assertFalse(self.store.get_work_area(area_id)["is_active"])
+        # An account with a registry assignment is not offered the demo.
+        asha = self.call("GET", "/api/assignments", "asha").json()
+        self.assertNotIn("demo", [i["kind"] for i in asha["items"]])
+        self.assertEqual(self.call("POST", "/api/assignments/ASGN-TEST-DEMO/activate", "asha").status_code, 404)
 
     def test_invalid_geometry_is_a_400_with_the_reason(self):
         response = self.call(

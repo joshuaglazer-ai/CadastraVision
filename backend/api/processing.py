@@ -65,14 +65,35 @@ def from_dataset(
     return processing_service.public_job(job)
 
 
-@router.post("/{job_id}/start")
-def start(
+@router.get("/{job_id}/area-check")
+def area_check(
     job_id: str,
     context: SurveyorContext = Depends(current_context),
     store: Store = Depends(store_dep),
 ):
+    """Whether the job's image overlaps the current area, how far away it is
+    if not, and which of the account's areas it does overlap."""
+
     try:
-        job = processing_service.start(context, settings, store, job_id)
+        job = processing_service.authorise(store.get_job(job_id), context)
+        return processing_service.area_check(job, context, settings, store)
+    except processing_service.ProcessingError as exc:
+        raise service_error(exc)
+
+
+@router.post("/{job_id}/start")
+def start(
+    job_id: str,
+    confirm_outside_area: bool = Query(
+        default=False, description="Process the image although it does not overlap the current area"
+    ),
+    context: SurveyorContext = Depends(current_context),
+    store: Store = Depends(store_dep),
+):
+    try:
+        job = processing_service.start(
+            context, settings, store, job_id, confirm_outside_area=confirm_outside_area
+        )
     except processing_service.ProcessingError as exc:
         raise service_error(exc)
     return processing_service.public_job(job)

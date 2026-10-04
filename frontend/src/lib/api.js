@@ -141,8 +141,15 @@ export async function uploadGeoTIFF(file, onProgress) {
 export const createJobFromDataset = async (datasetId) =>
   (await api.post(`/api/processing/from-dataset/${encodeURIComponent(datasetId)}`)).data;
 
-export const startProcessing = async (jobId) =>
-  (await api.post(`/api/processing/${encodeURIComponent(jobId)}/start`)).data;
+// Whether the job's image overlaps the current area, and which areas it does.
+export const getAreaCheck = (jobId) => get(`/api/processing/${encodeURIComponent(jobId)}/area-check`);
+
+export const startProcessing = async (jobId, { confirmOutsideArea = false } = {}) =>
+  (
+    await api.post(`/api/processing/${encodeURIComponent(jobId)}/start`, null, {
+      params: confirmOutsideArea ? { confirm_outside_area: true } : undefined,
+    })
+  ).data;
 
 // --------------------------------------------------------------- reviews
 export const getReviewQueue = (source, { group, includeFragments, limit, offset } = {}) =>

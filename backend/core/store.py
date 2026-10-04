@@ -137,6 +137,12 @@ _JOB_JSON = {
     "stages_json": "stages",
     "raster_meta_json": "raster_meta",
     "summary_json": "summary",
+    "area_check_json": "area_check",
+}
+
+# Columns added after the first release, created on databases that predate them.
+_ADDED_COLUMNS = {
+    "jobs": [("area_check_json", "TEXT")],
 }
 _REVIEW_JSON = {
     "original_geometry_json": "original_geometry",
@@ -177,6 +183,11 @@ class Store:
         self._lock = threading.Lock()
         with self._connect() as conn:
             conn.executescript(SCHEMA)
+            for table, columns in _ADDED_COLUMNS.items():
+                present = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
+                for name, kind in columns:
+                    if name not in present:
+                        conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {kind}")
 
     @contextmanager
     def _connect(self) -> Iterator[sqlite3.Connection]:
@@ -763,6 +774,15 @@ class Store:
                 (area_id, owner_email.lower()),
             )
         return cursor.rowcount > 0
+
+    def clear_area_choice(self, owner_email: str) -> None:
+        """No work area active and no registry choice: the account falls back
+        to its registry assignment or, if allowed, the demo assignment."""
+
+        owner = owner_email.lower()
+        with self._lock, self._connect() as conn:
+            conn.execute("UPDATE work_areas SET is_active = 0 WHERE owner_email = ?", (owner,))
+            conn.execute("DELETE FROM assignment_preferences WHERE owner_email = ?", (owner,))
 
     def activate_work_area(self, area_id: str, owner_email: str) -> None:
         """Make one work area current; every other area of the owner is not."""

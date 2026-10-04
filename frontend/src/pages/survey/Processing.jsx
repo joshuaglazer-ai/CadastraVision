@@ -10,6 +10,7 @@ import { Tag } from "../../components/StatusBadge";
 import { useWorkspace } from "../../context/WorkspaceContext";
 import {
   errorMessage,
+  getAreaCheck,
   getJob,
   getJobs,
   getPipelineStages,
@@ -139,7 +140,7 @@ function Summary({ job, onOpen }) {
 }
 
 export default function Processing() {
-  const { system, refreshSystem, setSource } = useWorkspace();
+  const { system, refreshSystem, setSource, switchArea } = useWorkspace();
   const [params, setParams] = useSearchParams();
   const navigate = useNavigate();
   const fileInput = useRef(null);
@@ -151,6 +152,9 @@ export default function Processing() {
   const [listError, setListError] = useState("");
   const [upload, setUpload] = useState({ busy: false, progress: 0, error: "" });
   const [actionError, setActionError] = useState("");
+  // The image lies outside the current area: shown before anything starts.
+  const [outside, setOutside] = useState(null);
+  const [starting, setStarting] = useState(false);
   const [dragging, setDragging] = useState(false);
 
   const jobId = params.get("job");
@@ -231,14 +235,52 @@ export default function Processing() {
     }
   }
 
+  async function start(confirmOutsideArea = false) {
+    const started = await startProcessing(job.job_id, { confirmOutsideArea });
+    setOutside(null);
+    setJob(started);
+    setPollKey((value) => value + 1); // follow the job again
+  }
+
+  // Check the image against the current area first; warn before starting
+  // when it lies outside.
   async function handleStart() {
     setActionError("");
+    setOutside(null);
+    setStarting(true);
     try {
-      const started = await startProcessing(job.job_id);
-      setJob(started);
-      setPollKey((value) => value + 1); // follow the job again
+      const check = await getAreaCheck(job.job_id);
+      if (check.intersects === false) {
+        setOutside(check);
+        return;
+      }
+      await start(false);
     } catch (error) {
       setActionError(errorMessage(error, "The job could not be started."));
+    } finally {
+      setStarting(false);
+    }
+  }
+
+  async function handleStartAnyway() {
+    setActionError("");
+    setStarting(true);
+    try {
+      await start(true);
+    } catch (error) {
+      setActionError(errorMessage(error, "The job could not be started."));
+    } finally {
+      setStarting(false);
+    }
+  }
+
+  async function handleSwitch(areaId) {
+    setActionError("");
+    try {
+      // The page reloads for the new area; start the job from there.
+      await switchArea(areaId);
+    } catch (error) {
+      setActionError(errorMessage(error, "The area could not be switched."));
     }
   }
 
@@ -369,9 +411,58 @@ export default function Processing() {
                   </div>
                 ) : null}
 
+                {job.area_check?.intersects === false ? (
+                  <div className="notice notice--warn">
+                    <Icon name="alert" size={16} />
+                    <p>
+                      Processed although the image lies outside the area it was started in
+                      {job.area_check.area_name ? ` (${job.area_check.area_name})` : ""}
+                      {job.area_check.distance_km != null ? `, about ${formatNumber(job.area_check.distance_km)} km away` : ""}.
+                    </p>
+                  </div>
+                ) : null}
+
+                {outside ? (
+                  <div className="notice notice--warn area-warning" role="alertdialog" aria-labelledby="area-warning-title">
+                    <Icon name="alert" size={18} />
+                    <div className="stack" style={{ gap: 10 }}>
+                      <p id="area-warning-title">
+                        <strong>{outside.message}</strong> Features from this image would not appear in the
+                        current area.
+                      </p>
+                      <div className="row" style={{ flexWrap: "wrap", gap: 8 }}>
+                        {outside.matching_areas
+                          .filter((area) => !area.is_current)
+                          .map((area) => (
+                            <button
+                              key={area.assignment_id}
+                              type="button"
+                              className="btn btn--primary btn--sm"
+                              onClick={() => handleSwitch(area.assignment_id)}
+                            >
+                              Switch to {area.name || area.assignment_id}
+                            </button>
+                          ))}
+                        <button type="button" className="btn btn--secondary btn--sm" onClick={handleStartAnyway} disabled={starting}>
+                          Start anyway
+                        </button>
+                        <button type="button" className="btn btn--ghost btn--sm" onClick={() => setOutside(null)}>
+                          Cancel
+                        </button>
+                      </div>
+                      {!outside.matching_areas.some((area) => !area.is_current) ? (
+                        <p className="field__hint">
+                          None of your areas covers this image. Add a work area over it on the Assignment page to keep
+                          its results in an area of their own.
+                        </p>
+                      ) : null}
+                    </div>
+                  </div>
+                ) : null}
+
                 {["UPLOADED", "FAILED"].includes(job.status) ? (
                   <div className="row">
-                    <button type="button" className="btn btn--primary" disabled={!modelReady} onClick={handleStart}>
+                    <button type="button" className="btn btn--primary" disabled={!modelReady || starting} onClick={handleStart}>
                       <Icon name="cpu" size={16} />
                       {job.status === "FAILED" ? "Start again" : "Start processing"}
                     </button>

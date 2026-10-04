@@ -78,7 +78,7 @@ it, and an owner field in a request body is ignored.
 | POST | `/api/assignments` | `{name, state?, district?, taluk?, village?, origin, boundary, activate?}` → the new work area (`201`). `activate` defaults to true. |
 | PATCH | `/api/assignments/{id}` | Any of `name`, `state`, `district`, `taluk`, `village`, `boundary`, `origin`, `reason` |
 | DELETE | `/api/assignments/{id}` | `{deleted, was_active}` |
-| POST | `/api/assignments/{id}/activate` | Makes one of the account's work areas, or one of its registry assignments, the current area |
+| POST | `/api/assignments/{id}/activate` | Makes one of the account's work areas, one of its registry assignments, or the demo assignment (see below) the current area |
 
 - `boundary` is a GeoJSON Polygon or MultiPolygon, a Feature, or a FeatureCollection
   holding exactly one polygon feature. A `crs` member is honoured and the geometry is
@@ -90,6 +90,10 @@ it, and an owner field in a request body is ignored.
   on a line, areas under 1 m² or over 1,000 km², more than 20,000 vertices, a CRS that
   cannot be used, text fields over 120 characters, an empty name, an `origin` other than
   `drawn` or `uploaded`.
+- When demo fallback is allowed and no registry assignment lists the account, the demo
+  assignment is listed too (`kind: "demo"`) and can be activated, so an account can
+  return to it after using a work area; activating it keeps the work areas and makes
+  none current.
 - Registry assignments are read-only: PATCH and DELETE on them return `404`. Another
   account's work area returns `404` for every method, the same answer as for an id that
   does not exist.
@@ -154,14 +158,24 @@ outline.
 | GET | `/api/processing/stages` | The twelve stages, in order |
 | POST | `/api/processing/upload` | Multipart `file` (`.tif` or `.tiff`). Validates the raster and registers a job. `400` wrong type or unreadable, `413` too large, `422` not usable for inference. |
 | POST | `/api/processing/from-dataset/{dataset_id}` | Registers a job for imagery already in the library |
-| POST | `/api/processing/{job_id}/start` | Queues the job. Idempotent for a running or finished job. |
+| GET | `/api/processing/{job_id}/area-check` | Whether the image overlaps the current area: `{intersects, distance_km, message, area_id, area_name, image_bbox, matching_areas}` |
+| POST | `/api/processing/{job_id}/start` | Queues the job. Idempotent for a running or finished job. If the image does not overlap the current area, answers `409` with the distance unless `confirm_outside_area=true` is passed. |
 | GET | `/api/processing/{job_id}` | Job state |
 | GET | `/api/processing/{job_id}/result` | Summary and layer statistics. `409` until the job has completed. |
 
 A job has `job_id`, `status` (`UPLOADED`, `QUEUED`, `PROCESSING`, `COMPLETED`,
 `FAILED`), `stage`, `progress` (0 to 100), `stages` (each with `status`, `fraction`,
 `detail`), `input_dataset`, `output_dataset`, `raster_meta`, `summary`, `error`,
-`surveyor_id`, `assignment_id`, `created_at`, `updated_at`, and `source` once completed.
+`surveyor_id`, `assignment_id`, `area_check`, `created_at`, `updated_at`, and `source`
+once completed.
+
+A job belongs to the area that is current when it is **started**: `assignment_id` is
+set then, and `area_check` records whether the image overlapped that area
+(`intersects`), how far away it was if not (`distance_km`, geodesic, between the image
+extent and the area boundary) and whether the surveyor confirmed processing it anyway
+(`confirmed_outside_area`). `matching_areas` lists the account's areas the image does
+overlap, so the client can offer to switch. Jobs started before this check existed
+have `area_check: null`.
 
 Stages: `UPLOAD`, `LOAD_MODEL`, `READ_RASTER`, `TILE_IMAGE`, `RUN_SEGMENTATION`,
 `CALCULATE_CONFIDENCE`, `CALCULATE_ENTROPY`, `POLYGONIZE`, `REPAIR_GEOMETRY`,
