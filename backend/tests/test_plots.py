@@ -235,83 +235,84 @@ class TessellationTests(unittest.TestCase):
         self.assertNotIn("UNCERTAINTY_UNAVAILABLE", props["qa_flags"])
 
 
-if HAVE_STACK:
-    from backend.config import settings
-    from backend.core import runtime
-    from backend.services import plot_service, processing_service
-    from backend.tests.test_processing import ProcessingCase, fake_pipeline
+from backend.config import settings
+from backend.core import runtime
+from backend.services import plot_service, processing_service
+from backend.tests.test_processing import ProcessingCase, fake_pipeline
 
-    class PlotsInTheAppTests(ProcessingCase):
-        """A completed job's plots: map layer, export, analytics, reference check."""
 
-        def setUp(self):
-            super().setUp()
-            job_id = self.create_job()["job_id"]
-            with mock.patch.object(processing_service.pipeline, "run_pipeline", side_effect=fake_pipeline), \
-                    mock.patch.object(settings, "plots_enabled", False):
-                self.client.post(f"/api/processing/{job_id}/start")
-                self.wait_for(job_id)
-            self.job_id = job_id
-            out = runtime.job_output_dir(job_id)
-            # The fixture's features come from the stand-in pipeline; add a
-            # matching class raster (all Field) for the plot step.
-            self._raster_for_fixture(out)
-            state = plot_service.build_for_job(job_id, settings, self.store)
-            self.assertEqual(state["status"], "COMPLETED", state)
+@unittest.skipUnless(HAVE_STACK, f"GIS stack not installed: {MISSING}")
+class PlotsInTheAppTests(ProcessingCase):
+    """A completed job's plots: map layer, export, analytics, reference check."""
 
-        def _raster_for_fixture(self, out: Path):
-            e0, n0 = support.origin_utm()
-            width, height = 1200, 900  # 0.1 m cells over x -10..110, y -15..75
-            west, north = e0 - 10, n0 + 75
-            with rasterio.open(
-                out / "prediction.tif", "w", driver="GTiff", width=width, height=height, count=1, dtype="uint8",
-                crs="EPSG:32643", transform=from_origin(west, north, 0.1, 0.1), nodata=255,
-            ) as dst:
-                dst.write(np.ones((height, width), dtype=np.uint8), 1)
+    def setUp(self):
+        super().setUp()
+        job_id = self.create_job()["job_id"]
+        with mock.patch.object(processing_service.pipeline, "run_pipeline", side_effect=fake_pipeline), \
+                mock.patch.object(settings, "plots_enabled", False):
+            self.client.post(f"/api/processing/{job_id}/start")
+            self.wait_for(job_id)
+        self.job_id = job_id
+        out = runtime.job_output_dir(job_id)
+        # The fixture's features come from the stand-in pipeline; add a
+        # matching class raster (all Field) for the plot step.
+        self._raster_for_fixture(out)
+        state = plot_service.build_for_job(job_id, settings, self.store)
+        self.assertEqual(state["status"], "COMPLETED", state)
 
-        def test_plots_are_their_own_layer_export_and_count(self):
-            source = f"job:{self.job_id}"
-            catalogue = {l["key"]: l for l in self.ok("/api/map/layers", source=source)["layers"]}
-            self.assertTrue(catalogue["plots"]["available"])
-            self.assertEqual(catalogue["plots"]["count"], 2)  # buildings of 80 and 36 m2
-            self.assertTrue(catalogue["parcels"]["available"])  # the parcel layer is unchanged
+    def _raster_for_fixture(self, out: Path):
+        e0, n0 = support.origin_utm()
+        width, height = 1200, 900  # 0.1 m cells over x -10..110, y -15..75
+        west, north = e0 - 10, n0 + 75
+        with rasterio.open(
+            out / "prediction.tif", "w", driver="GTiff", width=width, height=height, count=1, dtype="uint8",
+            crs="EPSG:32643", transform=from_origin(west, north, 0.1, 0.1), nodata=255,
+        ) as dst:
+            dst.write(np.ones((height, width), dtype=np.uint8), 1)
 
-            plots = self.ok("/api/map/plots", source=source)
-            self.assertEqual(len(plots["features"]), 2)
-            uid = plots["features"][0]["id"]
-            detail = self.ok(f"/api/map/features/{uid}", source=source)
-            self.assertEqual(detail["properties"]["verification_status"], "REVIEW_REQUIRED")
+    def test_plots_are_their_own_layer_export_and_count(self):
+        source = f"job:{self.job_id}"
+        catalogue = {l["key"]: l for l in self.ok("/api/map/layers", source=source)["layers"]}
+        self.assertTrue(catalogue["plots"]["available"])
+        self.assertEqual(catalogue["plots"]["count"], 2)  # buildings of 80 and 36 m2
+        self.assertTrue(catalogue["parcels"]["available"])  # the parcel layer is unchanged
 
-            review = self.client.post("/api/reviews", json={"feature_id": uid, "action": "approve", "source": source})
-            self.assertEqual(review.status_code, 200, review.text)
+        plots = self.ok("/api/map/plots", source=source)
+        self.assertEqual(len(plots["features"]), 2)
+        uid = plots["features"][0]["id"]
+        detail = self.ok(f"/api/map/features/{uid}", source=source)
+        self.assertEqual(detail["properties"]["verification_status"], "REVIEW_REQUIRED")
 
-            analytics = self.ok("/api/analytics", source=source)
-            self.assertEqual(analytics["candidate_plots"], 2)
-            self.assertEqual(analytics["plots"]["one_building"], 2)
-            self.assertEqual(analytics["plots"]["one_building_share"], 1.0)
-            self.assertNotEqual(analytics["candidate_plots"], analytics["candidate_parcels"])
+        review = self.client.post("/api/reviews", json={"feature_id": uid, "action": "approve", "source": source})
+        self.assertEqual(review.status_code, 200, review.text)
 
-            exported = self.client.get("/api/export/geojson", params={"source": source, "layer": "plots"}).json()
-            self.assertEqual(len(exported["features"]), 2)
-            self.assertEqual(exported["features"][0]["properties"]["delineation_method"], "morphological_tessellation")
+        analytics = self.ok("/api/analytics", source=source)
+        self.assertEqual(analytics["candidate_plots"], 2)
+        self.assertEqual(analytics["plots"]["one_building"], 2)
+        self.assertEqual(analytics["plots"]["one_building_share"], 1.0)
+        self.assertNotEqual(analytics["candidate_plots"], analytics["candidate_parcels"])
 
-        def test_reference_check(self):
-            folder = settings.data_dir / "land_records"
-            # One reference footprint per building, and one more in the first plot.
-            records = [
-                support.feature(support.rect(6, 6, 2, 2), ref="A"),
-                support.feature(support.rect(12, 9, 2, 2), ref="B"),
-                support.feature(support.rect(66, 6, 2, 2), ref="C"),
-                support.feature(support.rect(300, 300, 2, 2), ref="far away"),
-            ]
-            path = support.write_json(folder / "reference_footprints.geojson", support.collection("ref", records))
-            self.addCleanup(path.unlink)
-            check = self.ok("/api/analytics", source=f"job:{self.job_id}")["plots"]["reference_check"]
-            self.assertEqual(check["reference_features"], 3)  # the far one is outside the area
-            self.assertEqual(check["plots_with_one"], 1)
-            self.assertEqual(check["plots_with_several"], 1)
-            self.assertEqual(check["plots_with_none"], 0)
-            self.assertEqual(check["reference_with_own_plot"], 1)
+        exported = self.client.get("/api/export/geojson", params={"source": source, "layer": "plots"}).json()
+        self.assertEqual(len(exported["features"]), 2)
+        self.assertEqual(exported["features"][0]["properties"]["delineation_method"], "morphological_tessellation")
+
+    def test_reference_check(self):
+        folder = settings.data_dir / "land_records"
+        # One reference footprint per building, and one more in the first plot.
+        records = [
+            support.feature(support.rect(6, 6, 2, 2), ref="A"),
+            support.feature(support.rect(12, 9, 2, 2), ref="B"),
+            support.feature(support.rect(66, 6, 2, 2), ref="C"),
+            support.feature(support.rect(300, 300, 2, 2), ref="far away"),
+        ]
+        path = support.write_json(folder / "reference_footprints.geojson", support.collection("ref", records))
+        self.addCleanup(path.unlink)
+        check = self.ok("/api/analytics", source=f"job:{self.job_id}")["plots"]["reference_check"]
+        self.assertEqual(check["reference_features"], 3)  # the far one is outside the area
+        self.assertEqual(check["plots_with_one"], 1)
+        self.assertEqual(check["plots_with_several"], 1)
+        self.assertEqual(check["plots_with_none"], 0)
+        self.assertEqual(check["reference_with_own_plot"], 1)
 
 
 if __name__ == "__main__":
