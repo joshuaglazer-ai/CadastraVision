@@ -20,9 +20,11 @@ try:
     import torch
 
     HAVE_TORCH = True
-except Exception:  # ImportError or a broken install
+    TORCH_MISSING = ""
+except Exception as exc:  # ImportError or a broken install
     torch = None
     HAVE_TORCH = False
+    TORCH_MISSING = f"{type(exc).__name__}: {exc}"
 
 MANIFEST = Path(__file__).parent / "fixtures" / "checkpoint_manifest.json"
 CHECKPOINT = Path(model_module.__file__).resolve().parents[1] / "models" / "best_weighted_multiclass_unet.pth"
@@ -43,7 +45,7 @@ class ModelStatusTests(unittest.TestCase):
         self.assertEqual(tensors["encoder.conv1.weight"]["shape"], [64, 3, 7, 7])
 
 
-@unittest.skipUnless(HAVE_TORCH, "PyTorch / segmentation-models-pytorch not installed")
+@unittest.skipUnless(HAVE_TORCH, f"PyTorch / segmentation-models-pytorch not usable: {TORCH_MISSING}")
 class ArchitectureTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -109,7 +111,7 @@ class ArchitectureTests(unittest.TestCase):
         self.assertFalse(loaded.training)
 
 
-@unittest.skipUnless(HAVE_TORCH, "PyTorch / segmentation-models-pytorch not installed")
+@unittest.skipUnless(HAVE_TORCH, f"PyTorch / segmentation-models-pytorch not usable: {TORCH_MISSING}")
 @unittest.skipUnless(CHECKPOINT.exists(), "trained checkpoint is not present in backend/models/")
 class TrainedCheckpointTests(unittest.TestCase):
     def test_trained_weights_load_strictly_and_predict(self):
