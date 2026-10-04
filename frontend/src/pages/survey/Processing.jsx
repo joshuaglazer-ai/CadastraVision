@@ -97,8 +97,8 @@ function PlotStatus({ job, onJobChange }) {
           <strong>{formatNumber(plots.plots)}</strong> plots from {formatNumber(plots.seed_buildings)} buildings of at
           least {plots.min_building_m2} m², within {plots.limit_m} m of a building
           {plots.area_m2 ? `; median ${formatArea(plots.area_m2.median)}` : ""}
-          {plots.one_building_share_seed_rule != null
-            ? `; one building per plot: ${formatPercent(plots.one_building_share_seed_rule, 0)} counting buildings of at least ${plots.min_building_m2} m², ${formatPercent(plots.one_building_share_all, 0)} counting every detected building`
+          {plots.one_building_share != null
+            ? `; ${formatPercent(plots.one_building_share, 0)} hold exactly one detected building`
             : ""}.
         </p>
       ) : status === "FAILED" ? (

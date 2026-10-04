@@ -34,9 +34,8 @@ def main(argv: list[str] | None = None) -> int:
         if state["status"] == "COMPLETED":
             area = state.get("area_m2") or {}
             print(f"{job_id}: {state['plots']} plots from {state['seed_buildings']} buildings, "
-                  f"median {area.get('median')} m2, one-building share "
-                  f"{state.get('one_building_share_seed_rule')} (buildings >= 5 m2) / "
-                  f"{state.get('one_building_share_all')} (all detected), "
+                  f"median {area.get('median')} m2, holding one detected building "
+                  f"{state.get('one_building_share')}, "
                   f"{state['elapsed_seconds']} s")
         else:
             failed += 1

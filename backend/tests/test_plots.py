@@ -118,8 +118,7 @@ class TessellationTests(unittest.TestCase):
         ):
             geom = utm(feature["geometry"])
             self.assertGreater(geom.intersection(building).area, 0.99 * building.area)
-            self.assertEqual(feature["properties"]["buildings_inside_all"], 1)
-            self.assertEqual(feature["properties"]["buildings_inside_seed_rule"], 1)
+            self.assertEqual(feature["properties"]["buildings_inside"], 1)
         gap = local(14, 10, 2, 6)
         self.assertGreater((a.union(b)).intersection(gap).area, 0.95 * gap.area)
 
@@ -188,11 +187,10 @@ class TessellationTests(unittest.TestCase):
         self.assertEqual(props["building_feature_id"], "BLD-000001")
         self.assertAlmostEqual(props["building_area_m2"], 17.5, delta=0.2)  # 16 m2 seed + 1.5 m2 shed
         self.assertAlmostEqual(props["coverage_ratio"], props["building_area_m2"] / props["area_m2"], places=3)
-        # Counted two ways: the 1.5 m2 shed is a detected building, not one that gets a plot.
-        self.assertEqual(props["buildings_inside_all"], 2)
-        self.assertEqual(props["buildings_inside_seed_rule"], 1)
-        self.assertEqual(summary["one_building_share_seed_rule"], 1.0)
-        self.assertEqual(summary["one_building_share_all"], 0.0)
+        # The 1.5 m2 shed is a detected building too, though it gets no plot of its own.
+        self.assertEqual(props["buildings_inside"], 2)
+        self.assertEqual(summary["one_building_share"], 0.0)
+        self.assertNotIn("one_building_share_seed_rule", summary)
         self.assertEqual(props["building_confidence"], 0.8)
         self.assertTrue(props["road_access_candidate"])
         self.assertLess(props["nearest_road_distance_m"], 5.0)
@@ -289,9 +287,8 @@ if HAVE_STACK:
 
             analytics = self.ok("/api/analytics", source=source)
             self.assertEqual(analytics["candidate_plots"], 2)
-            self.assertEqual(analytics["plots"]["one_building_seed_rule"], 2)
-            self.assertEqual(analytics["plots"]["one_building_share_all"], 1.0)
-            self.assertIn("two ways", analytics["plots"]["one_building_basis"])
+            self.assertEqual(analytics["plots"]["one_building"], 2)
+            self.assertEqual(analytics["plots"]["one_building_share"], 1.0)
             self.assertNotEqual(analytics["candidate_plots"], analytics["candidate_parcels"])
 
             exported = self.client.get("/api/export/geojson", params={"source": source, "layer": "plots"}).json()

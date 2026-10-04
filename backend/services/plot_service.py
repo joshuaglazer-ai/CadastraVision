@@ -79,7 +79,7 @@ def overview(context: SurveyorContext, settings: Settings, source: str) -> dict[
         if _in_box(feature.get("bbox"), area)
     ]
     sizes = sorted(float(f["properties"].get("area_m2") or 0.0) for f in features)
-    shares = plot_builder.one_building_shares([f["properties"] for f in features])
+    share = plot_builder.one_building_share([f["properties"] for f in features])
     road = sum(1 for f in features if f["properties"].get("road_access_candidate") is True)
     return {
         "count": len(features),
@@ -87,11 +87,7 @@ def overview(context: SurveyorContext, settings: Settings, source: str) -> dict[
         "median_area_m2": round(_quantile(sizes, 0.5), 1) if sizes else None,
         "p10_area_m2": round(_quantile(sizes, 0.1), 1) if sizes else None,
         "p90_area_m2": round(_quantile(sizes, 0.9), 1) if sizes else None,
-        **shares,
-        "one_building_basis": (
-            "Counted two ways: buildings of at least the size that gets a plot of its own "
-            f"({settings.plot_min_building_m2:g} m²), and every detected building feature."
-        ),
+        **share,
         "low_coverage": sum(
             1 for f in features if (f["properties"].get("coverage_ratio") or 0) < plot_builder.LOW_COVERAGE
         ),

@@ -119,14 +119,7 @@ export default function FeaturePanel({
                       isNumber(properties.coverage_ratio) ? `${Math.round(properties.coverage_ratio * 100)} %` : <Unavailable />
                     }
                   />
-                  <Metric
-                    label="Buildings inside (≥ 5 m² / all)"
-                    value={
-                      isNumber(properties.buildings_inside_seed_rule)
-                        ? `${properties.buildings_inside_seed_rule} / ${properties.buildings_inside_all}`
-                        : <Unavailable />
-                    }
-                  />
+                  <Metric label="Detected buildings inside" value={measure(properties.buildings_inside, (v) => String(v))} />
                   <Metric label="Nearest road" value={measure(properties.nearest_road_distance_m, formatLength)} />
                   <Metric
                     label="Road access"
@@ -145,8 +138,8 @@ export default function FeaturePanel({
                   Method: morphological tessellation. Land within {properties.delineation_limit_m} m of the building,
                   not road or water, assigned to its nearest building on a{" "}
                   {Math.round((properties.delineation_grid_m || 0) * 100)} cm grid.
-                  {properties.buildings_inside_all > 1
-                    ? ` ${properties.buildings_inside_all} detected building features lie inside this plot, ${properties.buildings_inside_seed_rule} of them at least 5 m².`
+                  {properties.buildings_inside > 1
+                    ? ` ${properties.buildings_inside} detected buildings lie inside this plot.`
                     : ""}
                 </p>
               </section>

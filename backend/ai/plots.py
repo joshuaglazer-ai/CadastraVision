@@ -265,7 +265,6 @@ def build_plots(
             to_raster([shape(f["geometry"]) for f in collection["features"]
                        if (f.get("properties") or {}).get("class_id") == BUILDING_CLASS_ID])
         )
-        all_buildings_area = [g.area for g in all_buildings_m]
         building_tree = shapely.STRtree(np.array(all_buildings_m, dtype=object))
         roads_m = [
             g for f, g in zip(barriers, barriers_m) if (f.get("properties") or {}).get("class_id") == ROAD_CLASS_ID
@@ -311,11 +310,9 @@ def build_plots(
                 seed_props = seed.get("properties") or {}
                 inside = building_tree.query(geom, predicate="intersects")
                 building_area = float(sum(geom.intersection(all_buildings_m[i]).area for i in inside))
-                # Counted two ways: every detected building feature, and only
-                # those of at least min_building_m2 (the rule that seeds a plot).
-                contained = [i for i in inside if geom.contains(all_buildings_m[i].representative_point())]
-                buildings_inside_all = len(contained)
-                buildings_inside_seed_rule = sum(1 for i in contained if all_buildings_area[i] >= min_building_m2)
+                # Every detected building feature, of any size. (Counting only seeds
+                # would always give one: each seed gets a plot of its own.)
+                buildings_inside = sum(1 for i in inside if geom.contains(all_buildings_m[i].representative_point()))
                 distance = None
                 if road_tree is not None:
                     _, nearest = road_tree.query_nearest(geom, return_distance=True, all_matches=False)
@@ -335,8 +332,7 @@ def build_plots(
                     "compactness": round(measures["compactness"], 4),
                     "building_area_m2": round(building_area, 3),
                     "coverage_ratio": round(building_area / measures["area_m2"], 4) if measures["area_m2"] else None,
-                    "buildings_inside_all": buildings_inside_all,
-                    "buildings_inside_seed_rule": buildings_inside_seed_rule,
+                    "buildings_inside": buildings_inside,
                     "nearest_road_distance_m": round(distance, 3) if distance is not None else None,
                     "road_access_candidate": (distance <= road_access_distance_m) if distance is not None else None,
                     "building_confidence": seed_props.get("confidence"),
@@ -362,7 +358,7 @@ def build_plots(
             "plots": len(plots_out),
             "metric_crs": crs_label(metric_crs) if metric_crs is not None else None,
             "area_m2": _distribution(areas),
-            **one_building_shares([p["properties"] for p in plots_out]),
+            **one_building_share([p["properties"] for p in plots_out]),
             "elapsed_seconds": round(time.time() - started, 1),
             "outputs": {"plots": PLOTS_FILE},
         }
@@ -380,18 +376,12 @@ def build_plots(
     return summary
 
 
-def one_building_shares(plots: list[dict[str, Any]]) -> dict[str, Any]:
-    """Plots holding exactly one building, counted two ways."""
+def one_building_share(plots: list[dict[str, Any]]) -> dict[str, Any]:
+    """Plots holding exactly one detected building feature, of any size."""
 
     total = len(plots)
-    seeds = sum(1 for p in plots if p.get("buildings_inside_seed_rule") == 1)
-    every = sum(1 for p in plots if p.get("buildings_inside_all") == 1)
-    return {
-        "one_building_seed_rule": seeds,
-        "one_building_share_seed_rule": round(seeds / total, 4) if total else None,
-        "one_building_all": every,
-        "one_building_share_all": round(every / total, 4) if total else None,
-    }
+    one = sum(1 for p in plots if p.get("buildings_inside") == 1)
+    return {"one_building": one, "one_building_share": round(one / total, 4) if total else None}
 
 
 def _feature_uid(value, prefix: str) -> str | None:

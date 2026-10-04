@@ -240,11 +240,9 @@ processing status.
 
 `candidate_plots` is counted separately from `candidate_parcels`. `plots` (null when the
 source has none) gives `count`, `area_m2`, `p10_area_m2`, `median_area_m2`,
-`p90_area_m2`, the plots holding exactly one building counted two ways
-(`one_building_seed_rule` and `one_building_share_seed_rule` for buildings of at least
-`PLOT_MIN_BUILDING_M2`, which is 100 % by construction; `one_building_all` and
-`one_building_share_all` for every detected building feature), `low_coverage` (plots
-under 5 % built, flagged), `road_access`, and
+`p90_area_m2`, `one_building` and `one_building_share` (plots holding exactly one
+detected building feature of any size), `low_coverage` (plots under 5 % built, flagged),
+`road_access`, and
 `reference_check`: when an existing GIS layer covers the area, `reference_features`,
 `plots_with_one`, `plots_with_several`, `plots_with_none`, `reference_with_own_plot` and
 `reference_outside_plots` (each reference feature placed by its representative point).

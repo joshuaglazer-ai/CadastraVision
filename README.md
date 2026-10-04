@@ -276,9 +276,8 @@ result on the Processing page ("Build candidate plots"), `POST
 /api/processing/{job_id}/plots`, or `python -m backend.scripts.build_plots <job id>`.
 
 Each plot records its building's feature id, area, perimeter, the building area inside it
-and the coverage ratio, the detected buildings inside it counted two ways
-(`buildings_inside_seed_rule`: buildings of at least 5 m², the rule that gives a building
-a plot; `buildings_inside_all`: every detected building feature), road access and distance,
+and the coverage ratio, the number of detected buildings inside (any size), road access
+and distance,
 its building's mean model confidence, and `delineation_method:
 "morphological_tessellation"`. It is labelled **Candidate plot**, AI GENERATED /
 PRELIMINARY, and starts as review required with the reason "Boundary proposed by
@@ -300,19 +299,16 @@ model): 170 plots from 170 buildings, median 252 m² (10th to 90th percentile 46
 - **Plots around uncertain small buildings are mostly farmland.** 36 plots are under 5 %
   built (all flagged); their buildings have median confidence 0.52 (0.67 for all plots), so
   many are probably not buildings, and the plot is the 25 m of field around them.
-- **Plots holding exactly one building, counted two ways:**
-  - counting buildings of at least 5 m² (the rule that seeds a plot): **100 % (170 of
-    170)**. This is true by construction and says nothing about quality: every such
-    building gets its own plot, so no plot can hold two of them;
-  - counting every detected building feature: **58 % (98 of 170)**. Every extra building
-    counted inside a plot (outside the merged one) is under 5 m², median 1.8 m², with model
-    confidence around 0.4: specks that get no plot of their own, mostly not houses.
+- **58 % of plots (98 of 170) hold exactly one detected building.** Every extra building
+  counted inside a plot (outside the merged one) is under 5 m², median 1.8 m², with model
+  confidence around 0.4: specks that get no plot of their own, mostly not houses. The share
+  counting only buildings of at least 5 m² is not reported because it is 100 % by
+  construction: each such building seeds its own plot, so no plot can hold two of them.
 - Boundaries between neighbours are equidistant lines, not observed walls or fences; where
   a detected road has a gap, a plot can reach through it.
 
-On the Uplarshi centre crop (`JOB-98528EC34E`): 16 plots, median 68 m²; one building per
-plot 100 % counting buildings of at least 5 m², 81 % (13 of 16) counting every detected
-building feature; none under 5 % built. Not yet run on urban imagery with the urban model.
+On the Uplarshi centre crop (`JOB-98528EC34E`): 16 plots, median 68 m², 81 % (13 of 16)
+holding exactly one detected building, none under 5 % built. Not yet run on urban imagery with the urban model.
 
 ## Known limitations
 

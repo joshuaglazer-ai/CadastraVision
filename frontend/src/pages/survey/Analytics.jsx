@@ -182,17 +182,10 @@ export default function Analytics() {
                   {formatArea(data.plots.p10_area_m2)} / {formatArea(data.plots.median_area_m2)} /{" "}
                   {formatArea(data.plots.p90_area_m2)}
                 </dd>
-                <dt>Holding exactly one building of at least 5 m²</dt>
+                <dt>Holding exactly one detected building</dt>
                 <dd>
-                  {formatNumber(data.plots.one_building_seed_rule)}
-                  {isNumber(data.plots.one_building_share_seed_rule)
-                    ? ` (${formatPercent(data.plots.one_building_share_seed_rule, 0)})`
-                    : ""}
-                </dd>
-                <dt>Holding exactly one detected building feature (any size)</dt>
-                <dd>
-                  {formatNumber(data.plots.one_building_all)}
-                  {isNumber(data.plots.one_building_share_all) ? ` (${formatPercent(data.plots.one_building_share_all, 0)})` : ""}
+                  {formatNumber(data.plots.one_building)}
+                  {isNumber(data.plots.one_building_share) ? ` (${formatPercent(data.plots.one_building_share, 0)})` : ""}
                 </dd>
                 <dt>Flagged: building covers under 5% of the plot</dt>
                 <dd>{formatNumber(data.plots.low_coverage)}</dd>
