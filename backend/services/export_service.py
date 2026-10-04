@@ -22,7 +22,7 @@ from backend.core.store import Store
 from backend.services import map_service
 from backend.services.assignment_service import SurveyorContext
 
-EXPORT_LAYERS = ("parcels", "landcover")
+EXPORT_LAYERS = ("parcels", "landcover", "plots")
 STATUS_FILTERS = ("all", "verified", "unverified")
 
 STATUS_LABEL = {
@@ -60,6 +60,16 @@ def _export_features(
 ) -> Iterator[dict[str, Any]]:
     layers = runtime.get_layers()
     states = store.feature_states(source)
+    # Every feature of a job names the model it came from; jobs that ran
+    # before features carried it get it from the job record.
+    model_attributes = {}
+    job_model = _job_model(store, source)
+    if job_model:
+        model_attributes = {
+            "model_id": job_model.get("id"),
+            "model_file": job_model.get("file"),
+            "model_hash": job_model.get("hash"),
+        }
     for feature in layers.iter_full(source, layer, classes):
         state = states.get((source, feature["id"]))
         status = map_service.status_for(feature["properties"], state)
@@ -67,6 +77,9 @@ def _export_features(
             continue
         properties = dict(feature["properties"])
         properties.pop("layer", None)
+        for key, value in model_attributes.items():
+            if properties.get(key) is None:
+                properties[key] = value
         properties["verification_status"] = status
         properties["status_label"] = STATUS_LABEL.get(status, status)
         properties["review_count"] = state["review_count"] if state else 0
@@ -78,6 +91,13 @@ def _export_features(
             geometry = state["edited_geometry"]
             properties["geometry_source"] = "SURVEYOR_EDIT"
         yield {"type": "Feature", "id": feature["id"], "properties": properties, "geometry": geometry}
+
+
+def _job_model(store: Store, source: str) -> dict[str, Any] | None:
+    if not source.startswith("job:"):
+        return None
+    job = store.get_job(source.split(":", 1)[1])
+    return (job or {}).get("model") or None
 
 
 def metadata(
@@ -138,11 +158,7 @@ def metadata(
             if job
             else None
         ),
-        "model": {
-            "name": MODEL_LABEL,
-            "normalization": settings.normalization,
-            "status": "Predictions are model-derived and require surveyor verification.",
-        },
+        "model": _model_metadata(store, source, settings),
         "verification": {
             "verified_features": review_stats["verified_count"] + review_stats["edited_count"],
             "flagged_features": review_stats["flagged_count"] + review_stats["rejected_count"],
@@ -150,6 +166,28 @@ def metadata(
             "status_counts": review_stats["status_counts"],
         },
         "crs": "OGC:CRS84 (longitude, latitude; WGS 84)",
+    }
+
+
+def _model_metadata(store: Store, source: str, settings: Settings) -> dict[str, Any]:
+    """The checkpoint behind the exported features."""
+
+    status = "Predictions are model-derived and require surveyor verification."
+    job_model = _job_model(store, source)
+    if job_model:
+        return {
+            **job_model,
+            "architecture": MODEL_LABEL.split(" (")[0],
+            "normalization": settings.normalization,
+            "status": status,
+        }
+    return {
+        "id": None,
+        "name": "Not recorded: existing project layers supplied as files",
+        "file": None,
+        "hash": None,
+        "architecture": MODEL_LABEL.split(" (")[0],
+        "status": status,
     }
 
 
@@ -213,7 +251,15 @@ CSV_COLUMNS = [
     "review_count",
     "last_review_at",
     "last_reviewed_by",
+    "building_feature_id",
+    "building_area_m2",
+    "coverage_ratio",
+    "buildings_inside",
+    "delineation_method",
     "processing_job_id",
+    "model_id",
+    "model_file",
+    "model_hash",
     "source_dataset",
     "generated_at",
 ]
@@ -242,7 +288,12 @@ def csv_stream(
             f"# exported_at: {meta['exported_at']}",
             f"# layer: {layer}; source: {source}; status filter: {status_filter}",
             f"# assignment: {meta['assignment']['assignment_id']}; surveyor: {meta['surveyor']['surveyor_id']}",
-            f"# model: {meta['model']['name']}",
+            f"# model: {meta['model']['name']}"
+            + (
+                f" (id {meta['model']['id']}, file {meta['model']['file']}, sha256 {meta['model']['hash']})"
+                if meta["model"].get("id")
+                else ""
+            ),
             f"# {meta['disclaimer']}",
         ):
             buffer.write(line + "\n")

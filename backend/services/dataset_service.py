@@ -246,6 +246,22 @@ def vector_metadata(path: Path) -> dict[str, Any]:
             "geometry_types": types,
             "bounds_lonlat": extent,
         }
+        # Read as longitude/latitude (no crs member, or a geographic one) but
+        # the numbers cannot be degrees: almost always projected coordinates,
+        # such as UTM, saved without their CRS. Drawing them would be wrong.
+        if extent and (max(abs(extent[0]), abs(extent[2])) > 180 or max(abs(extent[1]), abs(extent[3])) > 90):
+            declared = "declares no CRS" if not header.get("crs") else f"declares {crs}"
+            result = {
+                "ok": False,
+                "error": (
+                    f"The file {declared}, so its coordinates are read as longitude/latitude, but they "
+                    f"reach x {max(abs(extent[0]), abs(extent[2])):,.0f} and y {max(abs(extent[1]), abs(extent[3])):,.0f}, "
+                    "which are not degrees. They look like projected coordinates (for example UTM). Export the "
+                    "file again in EPSG:4326, or keep EPSG:32643 and include its \"crs\" member."
+                ),
+                "crs": crs,
+                "feature_count": int(header.get("feature_count") or 0),
+            }
     except GeoJSONError as exc:
         result = {"ok": False, "error": str(exc)}
     _vector_cache[key] = result

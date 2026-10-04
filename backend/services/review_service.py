@@ -46,6 +46,8 @@ def _queue_layers(source: str) -> list[tuple[str, list[str] | None]]:
         if not has_parcels:
             classes.append("field")
         result.append(("landcover", classes))
+    if layers.layer(source, "plots") is not None:
+        result.append(("plots", None))
     return result
 
 

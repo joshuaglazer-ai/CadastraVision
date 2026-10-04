@@ -255,6 +255,31 @@ and the interface says "Model uncertainty not recorded" rather than showing a nu
 These thresholds are starting values chosen for this prototype. They are not calibrated
 against ground truth and should be revisited once verified data exists.
 
+## Candidate plots
+
+`ai/plots.py` makes a job's third layer, `candidate_plots.geojson`, after the job has
+completed (`services/plot_service.py` runs it, indexes it as the job's `plots` layer and
+records the outcome in `summary.plots`). It reads the job's class raster and features and
+writes nothing else, so the job's counts and areas never change.
+
+Method (morphological tessellation): seeds are the Building features of at least
+`PLOT_MIN_BUILDING_M2`, measured in UTM. The class raster is read on a grid of about
+`PLOT_GRID_M` (an integer multiple of the pixel); valid cells that are not Road or Water
+(rasterised from the features, all touched) are land. Every seed grows through land one
+cell at a time, alternating 4- and 8-neighbour steps, with no diagonal step between two
+barrier cells; each cell keeps the first seed to reach it. The work is cropped to the
+seeds' extent plus the limit, labels are 16-bit, and growth uses slice views (about 570
+MB peak on the full Uplarshi image, 2.5 minutes on CPU). Regions are traced, reprojected to
+the local UTM zone, cut to the exact `PLOT_LIMIT_M` buffer of their building, have the
+road and water polygons subtracted, and go through the same repair and topology checks as
+other features. They are disjoint by construction.
+
+In the layer index a plot has class key `plot`; QA always raises it to at least Medium
+with the reason above (and "No road detected within 5 m", and "Building covers under 5% of
+this plot; the building or the plot may not be real" when those apply), and does not
+flag missing model uncertainty, since the boundary is not a model output. The building's
+own confidence is kept as `building_confidence`.
+
 ## Parcel reasoning
 
 Two situations, and the response always says which one applies:

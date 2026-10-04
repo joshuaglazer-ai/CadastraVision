@@ -31,6 +31,14 @@ RINGS_MEDIUM = 50
 RINGS_HIGH = 500
 
 
+
+# Kept in step with backend.ai.plots (PLOT_REVIEW_REASON, LOW_COVERAGE, LOW_COVERAGE_REASON).
+PLOT_REVIEW_REASON = (
+    "Boundary proposed by geometric subdivision around a detected building; not observed in imagery"
+)
+PLOT_LOW_COVERAGE = 0.05
+PLOT_LOW_COVERAGE_REASON = "Building covers under 5% of this plot; the building or the plot may not be real"
+
 def _num(value: Any) -> float | None:
     if isinstance(value, bool) or value is None:
         return None
@@ -90,6 +98,7 @@ def assess(
     geometry_problems: list[str] | None = None,
     has_overlap: bool = False,
     road_access: bool | None = None,
+    coverage_ratio: float | None = None,
     sliver_area_m2: float = 1.0,
     min_parcel_area_m2: float = 25.0,
     road_access_distance_m: float = 5.0,
@@ -113,8 +122,14 @@ def assess(
     area = _num(area_m2)
     compactness = _num(compactness)
 
+    # --- candidate plots: a geometric proposal ---------------------------
+    if layer == "plots":
+        raise_to("Medium", PLOT_REVIEW_REASON, "GEOMETRIC_PROPOSAL")
+
     # --- model-derived uncertainty -------------------------------------
-    if confidence is None and entropy is None:
+    if layer == "plots":
+        pass  # the boundary is not a model output, so there is no model uncertainty for it
+    elif confidence is None and entropy is None:
         flags.append("UNCERTAINTY_UNAVAILABLE")
     else:
         if confidence is not None:
@@ -164,6 +179,13 @@ def assess(
                 raise_to("Medium", "Irregular outline for its area", "IRREGULAR_SHAPE")
 
     # --- parcel-specific -------------------------------------------------
+    coverage = _num(coverage_ratio)
+    if layer == "plots" and coverage is not None and coverage < PLOT_LOW_COVERAGE:
+        raise_to("Medium", PLOT_LOW_COVERAGE_REASON, "LOW_BUILDING_COVERAGE")
+
+    if layer == "plots" and area is not None and area >= min_parcel_area_m2 and road_access is False:
+        raise_to("Medium", f"No road detected within {road_access_distance_m:g} m", "NO_ROAD_ACCESS")
+
     if layer == "parcels" and area is not None:
         if area < min_parcel_area_m2 and not is_fragment:
             flags.append("BELOW_PARCEL_MINIMUM")

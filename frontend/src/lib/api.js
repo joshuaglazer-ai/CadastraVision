@@ -105,6 +105,10 @@ export async function uploadDataset(sourceType, file, onProgress) {
 // ------------------------------------------------------------------- map
 export const getMapLayers = (source) => get("/api/map/layers", withSource(source));
 
+export const getMapPlots = (source, { bbox, zoom, limit } = {}, signal) =>
+  get("/api/map/plots", withSource(source, { bbox, zoom, limit }), signal);
+export const buildPlots = async (jobId) =>
+  (await api.post(`/api/processing/${encodeURIComponent(jobId)}/plots`)).data;
 export const getMapParcels = (source, { bbox, zoom, limit } = {}, signal) =>
   get("/api/map/parcels", withSource(source, { bbox, zoom, limit }), signal);
 
@@ -144,12 +148,19 @@ export const createJobFromDataset = async (datasetId) =>
 // Whether the job's image overlaps the current area, and which areas it does.
 export const getAreaCheck = (jobId) => get(`/api/processing/${encodeURIComponent(jobId)}/area-check`);
 
-export const startProcessing = async (jobId, { confirmOutsideArea = false } = {}) =>
-  (
+// The checkpoints a job can run with; only an id is ever sent back.
+export const getModels = () => get("/api/processing/models");
+
+export const startProcessing = async (jobId, { confirmOutsideArea = false, modelId } = {}) => {
+  const params = {};
+  if (confirmOutsideArea) params.confirm_outside_area = true;
+  if (modelId) params.model_id = modelId;
+  return (
     await api.post(`/api/processing/${encodeURIComponent(jobId)}/start`, null, {
-      params: confirmOutsideArea ? { confirm_outside_area: true } : undefined,
+      params: Object.keys(params).length ? params : undefined,
     })
   ).data;
+};
 
 // --------------------------------------------------------------- reviews
 export const getReviewQueue = (source, { group, includeFragments, limit, offset } = {}) =>

@@ -184,6 +184,10 @@ def overview(
         weight = sum(w for _, w in values)
         return round(sum(v * w for v, w in values) / weight, 4) if weight else None
 
+    from backend.services import plot_service
+
+    plots = plot_service.overview(context, settings, source)
+
     return {
         "source": source,
         "ai_features": total_features,
@@ -194,6 +198,9 @@ def overview(
         "fragment_threshold_m2": settings.sliver_area_m2,
         "candidate_parcels": parcels["total"] if parcels else None,
         "parcels": parcels,
+        # Counted separately from candidate parcels: a different kind of proposal.
+        "candidate_plots": plots["count"] if plots else None,
+        "plots": plots,
         "buildings": {
             "count": buildings["count"] if buildings else (0 if landcover_stats else None),
             "area_m2": buildings["area_m2"] if buildings else (0.0 if landcover_stats else None),

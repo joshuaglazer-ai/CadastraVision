@@ -41,8 +41,10 @@ export default function FeaturePanel({
 }) {
   const properties = detail?.properties || selection?.properties || {};
   const isParcel = properties.layer === "parcels";
+  const isPlot = properties.layer === "plots";
   const verified = ["SURVEYOR_VERIFIED", "EDITED"].includes(properties.verification_status);
-  const classStyle = CLASS_STYLE[isParcel ? "parcels" : properties.class_key] || CLASS_STYLE.unknown;
+  const classStyle =
+    CLASS_STYLE[isParcel ? "parcels" : isPlot ? "plots" : properties.class_key] || CLASS_STYLE.unknown;
   const measure = (value, formatter) => (isNumber(value) ? formatter(value) : <Unavailable />);
 
   return (
@@ -51,7 +53,9 @@ export default function FeaturePanel({
         <div className="stack" style={{ gap: 6 }}>
           <div className="row" style={{ gap: 8 }}>
             <span className="swatch" style={{ color: classStyle.color, background: `${classStyle.fill}55` }} aria-hidden="true" />
-            <span className="muted">{isParcel ? "Candidate parcel" : properties.class_name || "Feature"}</span>
+            <span className="muted">
+              {isParcel ? "Candidate parcel" : isPlot ? "Candidate plot" : properties.class_name || "Feature"}
+            </span>
           </div>
           <span className="side-panel__id">{selection?.id}</span>
           <div className="row" style={{ gap: 6 }}>
@@ -79,7 +83,9 @@ export default function FeaturePanel({
           <>
             {!verified ? (
               <p className="uncertainty__note">
-                Preliminary geometry from AI segmentation. Not a legal cadastral ownership record.
+                {isPlot
+                  ? "Boundary proposed by geometric subdivision around a detected building; not observed in imagery. A preliminary proposal for a surveyor to check, not a cadastral record."
+                  : "Preliminary geometry from AI segmentation. Not a legal cadastral ownership record."}
               </p>
             ) : null}
 
@@ -101,13 +107,66 @@ export default function FeaturePanel({
 
             {isParcel ? <ParcelPanel properties={properties} reasoning={detail.reasoning} /> : null}
 
+            {isPlot ? (
+              <section>
+                <h4>How this plot was made</h4>
+                <div className="metric-grid">
+                  <Metric label="Building" value={properties.building_feature_id || <Unavailable />} />
+                  <Metric label="Building area" value={measure(properties.building_area_m2, formatArea)} />
+                  <Metric
+                    label="Coverage"
+                    value={
+                      isNumber(properties.coverage_ratio) ? `${Math.round(properties.coverage_ratio * 100)} %` : <Unavailable />
+                    }
+                  />
+                  <Metric
+                    label="Buildings inside (≥ 5 m² / all)"
+                    value={
+                      isNumber(properties.buildings_inside_seed_rule)
+                        ? `${properties.buildings_inside_seed_rule} / ${properties.buildings_inside_all}`
+                        : <Unavailable />
+                    }
+                  />
+                  <Metric label="Nearest road" value={measure(properties.nearest_road_distance_m, formatLength)} />
+                  <Metric
+                    label="Road access"
+                    value={
+                      properties.road_access_candidate == null ? (
+                        <Unavailable>No road detected</Unavailable>
+                      ) : properties.road_access_candidate ? (
+                        "Yes"
+                      ) : (
+                        "No"
+                      )
+                    }
+                  />
+                </div>
+                <p className="uncertainty__note">
+                  Method: morphological tessellation. Land within {properties.delineation_limit_m} m of the building,
+                  not road or water, assigned to its nearest building on a{" "}
+                  {Math.round((properties.delineation_grid_m || 0) * 100)} cm grid.
+                  {properties.buildings_inside_all > 1
+                    ? ` ${properties.buildings_inside_all} detected building features lie inside this plot, ${properties.buildings_inside_seed_rule} of them at least 5 m².`
+                    : ""}
+                </p>
+              </section>
+            ) : null}
+
             <section>
               <h4>Model-derived uncertainty</h4>
-              <ConfidenceIndicator
-                confidence={properties.confidence}
-                entropy={properties.entropy}
-                uncertainty={properties.uncertainty}
-              />
+              {isPlot ? (
+                <p className="uncertainty__note">
+                  The plot boundary is not a model output, so it has no model uncertainty of its own. Its
+                  building&apos;s mean model confidence is{" "}
+                  {isNumber(properties.building_confidence) ? properties.building_confidence.toFixed(2) : "not recorded"}.
+                </p>
+              ) : (
+                <ConfidenceIndicator
+                  confidence={properties.confidence}
+                  entropy={properties.entropy}
+                  uncertainty={properties.uncertainty}
+                />
+              )}
             </section>
 
             <section>

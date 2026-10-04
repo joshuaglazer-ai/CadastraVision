@@ -10,9 +10,11 @@ import { Tag } from "../../components/StatusBadge";
 import { useWorkspace } from "../../context/WorkspaceContext";
 import {
   errorMessage,
+  buildPlots,
   getAreaCheck,
   getJob,
   getJobs,
+  getModels,
   getPipelineStages,
   startProcessing,
   uploadGeoTIFF,
@@ -43,7 +45,80 @@ function RasterFacts({ meta }) {
   );
 }
 
-function Summary({ job, onOpen }) {
+/**
+ * Candidate plots of a completed job: a separate step on its outputs that
+ * leaves the job's other layers unchanged.
+ */
+function PlotStatus({ job, onJobChange }) {
+  const plots = job.summary?.plots;
+  const status = plots?.status;
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (!["QUEUED", "RUNNING"].includes(status)) return undefined;
+    let active = true;
+    const timer = window.setTimeout(async () => {
+      try {
+        const next = await getJob(job.job_id);
+        if (active) onJobChange(next);
+      } catch (err) {
+        if (active) setError(errorMessage(err, "The plot status could not be read."));
+      }
+    }, 3000);
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
+  }, [status, job, onJobChange]);
+
+  async function build() {
+    setBusy(true);
+    setError("");
+    try {
+      onJobChange(await buildPlots(job.job_id));
+    } catch (err) {
+      setError(errorMessage(err, "Candidate plots could not be started."));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const running = ["QUEUED", "RUNNING"].includes(status);
+  return (
+    <div className="stack" style={{ gap: 8 }}>
+      <h4>Candidate plots</h4>
+      <p className="field__hint">
+        Land around each detected building, divided by morphological tessellation. A geometric proposal for review;
+        the job&apos;s other features are not changed.
+      </p>
+      {status === "COMPLETED" ? (
+        <p>
+          <strong>{formatNumber(plots.plots)}</strong> plots from {formatNumber(plots.seed_buildings)} buildings of at
+          least {plots.min_building_m2} m², within {plots.limit_m} m of a building
+          {plots.area_m2 ? `; median ${formatArea(plots.area_m2.median)}` : ""}
+          {plots.one_building_share_seed_rule != null
+            ? `; one building per plot: ${formatPercent(plots.one_building_share_seed_rule, 0)} counting buildings of at least ${plots.min_building_m2} m², ${formatPercent(plots.one_building_share_all, 0)} counting every detected building`
+            : ""}.
+        </p>
+      ) : status === "FAILED" ? (
+        <p className="field__error">Candidate plots failed: {plots.error}</p>
+      ) : running ? (
+        <p className="muted" role="status">Building candidate plots…</p>
+      ) : (
+        <p className="muted">Not built for this job yet.</p>
+      )}
+      {error ? <p className="field__error" role="alert">{error}</p> : null}
+      <div className="row">
+        <button type="button" className="btn btn--secondary btn--sm" onClick={build} disabled={busy || running}>
+          <Icon name="shapes" size={15} /> {status === "COMPLETED" || status === "FAILED" ? "Rebuild candidate plots" : "Build candidate plots"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function Summary({ job, onOpen, onJobChange }) {
   const summary = job.summary;
   if (!summary) return null;
   const segmentation = summary.segmentation || {};
@@ -126,6 +201,8 @@ function Summary({ job, onOpen }) {
           </div>
         ) : null}
 
+        <PlotStatus job={job} onJobChange={onJobChange} />
+
         <div className="row">
           <button type="button" className="btn btn--primary" onClick={() => onOpen(job, "/map")}>
             <Icon name="map" size={16} /> Open on the map
@@ -156,10 +233,14 @@ export default function Processing() {
   const [outside, setOutside] = useState(null);
   const [starting, setStarting] = useState(false);
   const [dragging, setDragging] = useState(false);
+  // Segmentation checkpoints from the server's registry; the choice is sent as an id.
+  const [models, setModels] = useState({ list: [], error: "", loading: true });
+  const [modelId, setModelId] = useState("");
 
   const jobId = params.get("job");
   const model = system?.model;
-  const modelReady = Boolean(model?.checkpoint_present && model?.runtime_available);
+  const chosenModel = models.list.find((item) => item.id === modelId) || null;
+  const modelReady = Boolean(model?.runtime_available && chosenModel?.available);
 
   const loadJobs = useCallback(async () => {
     try {
@@ -173,12 +254,24 @@ export default function Processing() {
     }
   }, []);
 
+  const loadModels = useCallback(async () => {
+    setModels((current) => ({ ...current, loading: true, error: "" }));
+    try {
+      const data = await getModels();
+      setModels({ list: data.models, error: "", loading: false, note: data.note });
+      setModelId((current) => current || data.default);
+    } catch (error) {
+      setModels({ list: [], loading: false, error: errorMessage(error, "The models could not be listed.") });
+    }
+  }, []);
+
   useEffect(() => {
     loadJobs();
+    loadModels();
     getPipelineStages()
       .then((data) => setStageList(data.stages))
       .catch(() => {});
-  }, [loadJobs]);
+  }, [loadJobs, loadModels]);
 
   // Follow the selected job. While it is queued or running its record is
   // re-read; what is shown is always what the server has stored.
@@ -236,7 +329,7 @@ export default function Processing() {
   }
 
   async function start(confirmOutsideArea = false) {
-    const started = await startProcessing(job.job_id, { confirmOutsideArea });
+    const started = await startProcessing(job.job_id, { confirmOutsideArea, modelId });
     setOutside(null);
     setJob(started);
     setPollKey((value) => value + 1); // follow the job again
@@ -385,6 +478,13 @@ export default function Processing() {
               <div className="panel__body stack" style={{ gap: 16 }}>
                 <RasterFacts meta={job.raster_meta} />
 
+                {job.model ? (
+                  <p className="field__hint">
+                    Model: <strong>{job.model.name}</strong> ({job.model.file}
+                    {job.model.hash ? `, sha256 ${job.model.hash}` : ""}){job.model.note ? `. ${job.model.note}` : ""}
+                  </p>
+                ) : null}
+
                 {job.raster_meta?.warnings?.length ? (
                   <div className="notice notice--warn">
                     <Icon name="alert" size={16} />
@@ -461,6 +561,51 @@ export default function Processing() {
                 ) : null}
 
                 {["UPLOADED", "FAILED"].includes(job.status) ? (
+                  <div className="field model-select">
+                    <label htmlFor="model-select">Model</label>
+                    {models.error ? (
+                      <span className="field__error" role="alert">
+                        {models.error}{" "}
+                        <button type="button" className="link-btn" onClick={loadModels}>
+                          Try again
+                        </button>
+                      </span>
+                    ) : (
+                      <select
+                        id="model-select"
+                        className="select"
+                        value={modelId}
+                        onChange={(event) => setModelId(event.target.value)}
+                        disabled={models.loading || starting}
+                        aria-describedby="model-select-hint"
+                      >
+                        {models.list.map((item) => (
+                          <option key={item.id} value={item.id} disabled={!item.available}>
+                            {item.name} · suits {item.suits || "unspecified"} imagery
+                            {item.available ? "" : " (unavailable)"}
+                          </option>
+                        ))}
+                      </select>
+                    )}
+                    {chosenModel ? (
+                      <span className="field__hint" id="model-select-hint">
+                        {chosenModel.available
+                          ? `${chosenModel.trained_on || "Training data not stated"}. Licence: ${chosenModel.licence || "not stated"}. File ${chosenModel.file}, sha256 ${chosenModel.hash}.`
+                          : chosenModel.reason}
+                      </span>
+                    ) : null}
+                    {models.list.some((item) => !item.available) ? (
+                      <span className="field__hint">
+                        {models.list
+                          .filter((item) => !item.available)
+                          .map((item) => `${item.name}: ${item.reason}`)
+                          .join(" ")}
+                      </span>
+                    ) : null}
+                  </div>
+                ) : null}
+
+                {["UPLOADED", "FAILED"].includes(job.status) ? (
                   <div className="row">
                     <button type="button" className="btn btn--primary" disabled={!modelReady || starting} onClick={handleStart}>
                       <Icon name="cpu" size={16} />
@@ -468,7 +613,9 @@ export default function Processing() {
                     </button>
                     {!modelReady ? (
                       <span className="field__error">
-                        The model is not ready on this server, so processing cannot start.
+                        {!model?.runtime_available
+                          ? "The PyTorch runtime is not available on this server, so processing cannot start."
+                          : "The selected model is not available on this server. Choose another model."}
                       </span>
                     ) : null}
                   </div>
@@ -494,7 +641,7 @@ export default function Processing() {
             </section>
           )}
 
-          {job?.status === "COMPLETED" ? <Summary job={job} onOpen={openResult} /> : null}
+          {job?.status === "COMPLETED" ? <Summary job={job} onOpen={openResult} onJobChange={setJob} /> : null}
         </div>
 
         <div className="stack" style={{ gap: 16 }}>

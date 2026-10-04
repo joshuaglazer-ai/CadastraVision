@@ -20,7 +20,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, BinaryIO
 
-from backend.ai import pipeline
+from backend.ai import pipeline, registry
 from backend.ai.model import ModelLoadError
 from backend.config import Settings
 from backend.core import runtime
@@ -268,12 +268,19 @@ def start(
     job_id: str,
     *,
     confirm_outside_area: bool = False,
+    model_id: str | None = None,
 ) -> dict[str, Any]:
     job = authorise(store.get_job(job_id), context)
     if job["status"] in ("QUEUED", "PROCESSING", "COMPLETED"):
         return job
     if not Path(job["input_path"]).exists():
         raise ProcessingError("The input raster is no longer on the server. Upload it again.", 409)
+
+    # The model is chosen by id from the registry; the file is resolved here.
+    try:
+        model, _path = registry.choose(settings, model_id)
+    except registry.ModelChoiceError as exc:
+        raise ProcessingError(str(exc), exc.status_code) from exc
 
     # The job belongs to the area that is current when it starts.
     check = area_check(job, context, settings, store)
@@ -296,6 +303,7 @@ def start(
         summary=None,
         assignment_id=context.assignment_id,
         area_check=check,
+        model=registry.job_record(model),
     )
     store.add_audit(
         actor_id=context.surveyor_id,
@@ -304,6 +312,8 @@ def start(
         entity_type="job",
         entity_id=job_id,
         after={
+            "model_id": model["id"],
+            "model_hash": model["hash"],
             "assignment_id": context.assignment_id,
             "image_intersects_area": check["intersects"],
             "distance_km": check["distance_km"],
@@ -380,10 +390,19 @@ def _run(job_id: str, settings: Settings, store: Store) -> None:
 
     try:
         store.update_job(job_id, status="PROCESSING")
+        # Re-resolved by id: the file must still be the one recorded at start.
+        record = job.get("model") or registry.default_record(settings)
+        model, model_path = registry.choose(settings, record["id"])
+        if record.get("hash") and model["hash"] != record["hash"]:
+            raise pipeline.PipelineError(
+                f"{model['name']} changed on the server after the job was started "
+                f"(checkpoint {model['hash']}, recorded {record['hash']}). Start the job again."
+            )
         summary = pipeline.run_pipeline(
             job["input_path"],
             output_dir,
-            model_path=settings.model_path,
+            model_path=model_path,
+            model_info=registry.job_record(model),
             job_id=job_id,
             source_dataset=job["input_dataset"],
             tile_size=settings.tile_size,
@@ -409,6 +428,12 @@ def _run(job_id: str, settings: Settings, store: Store) -> None:
         )
         # Index the output so it is immediately available on the map.
         runtime.ensure_source(runtime.job_source(job_id))
+        if settings.plots_enabled:
+            # A separate step on the finished outputs: it never changes them,
+            # and a failure is recorded without failing the job.
+            from backend.services import plot_service
+
+            plot_service.build_for_job(job_id, settings, store)
         store.add_audit(
             actor_id="system",
             actor_email=None,
@@ -420,7 +445,7 @@ def _run(job_id: str, settings: Settings, store: Store) -> None:
                 "candidate_parcel_count": summary.get("candidate_parcel_count"),
             },
         )
-    except (pipeline.PipelineError, ModelLoadError) as exc:
+    except (pipeline.PipelineError, ModelLoadError, registry.ModelChoiceError) as exc:
         _fail(job_id, store, reporter, str(exc))
     except Exception as exc:  # unexpected: keep the trace in the server log
         log.error("Job %s failed:\n%s", job_id, traceback.format_exc())
@@ -469,6 +494,36 @@ def result(context: SurveyorContext, store: Store, job_id: str) -> dict[str, Any
         },
         "label": "AI GENERATED / PRELIMINARY",
     }
+
+
+def build_plots(context: SurveyorContext, settings: Settings, store: Store, job_id: str) -> dict[str, Any]:
+    """Queue (re)building a completed job's candidate plots."""
+
+    from backend.services import plot_service
+
+    job = authorise(store.get_job(job_id), context)
+    if job["status"] != "COMPLETED":
+        raise ProcessingError("Candidate plots are built from a completed job.", 409)
+    if ((job.get("summary") or {}).get("plots") or {}).get("status") in ("QUEUED", "RUNNING"):
+        return job
+    summary = dict(job.get("summary") or {})
+    summary["plots"] = {"status": "QUEUED", "queued_at": utc_now()}
+    job = store.update_job(job_id, summary=summary)
+    _executor.submit(plot_service.build_for_job, job_id, settings, store, context.surveyor_id)
+    return job
+
+
+def record_default_model(store: Store, settings: Settings) -> int:
+    """Jobs from before models were selectable ran with the default model;
+    record it on them (marked as recorded afterwards)."""
+
+    pending = store.jobs_without_model()
+    if not pending:
+        return 0
+    record = registry.default_record(settings)
+    for job_id in pending:
+        store.update_job(job_id, model=record)
+    return len(pending)
 
 
 def recover_interrupted(store: Store) -> int:

@@ -491,6 +491,10 @@ class LayerStore:
             raw_class = properties.get("source_class")
         ckey = class_key(raw_class)
         cid = KEY_TO_ID.get(ckey)
+        if kind == "plots":
+            # A geometric proposal around a building, not a model class.
+            ckey, cid = "plot", None
+            raw_class = "Candidate plot"
 
         if cid is not None:
             class_label = CLASS_NAMES[cid]
@@ -501,6 +505,8 @@ class LayerStore:
         uid = None
         if kind == "parcels" and properties.get("parcel_id") not in (None, ""):
             uid = str(properties["parcel_id"])
+        elif kind == "plots" and properties.get("plot_id") not in (None, ""):
+            uid = str(properties["plot_id"])
         elif properties.get("uid") not in (None, ""):
             uid = str(properties["uid"])
         elif isinstance(properties.get("feature_id"), str) and "-" in properties["feature_id"]:
@@ -511,7 +517,9 @@ class LayerStore:
                 number = int(number)
             except (TypeError, ValueError):
                 number = index
-            prefix = "CAND" if kind == "parcels" else CLASS_PREFIX.get(cid, "FTR") if cid is not None else "FTR"
+            prefix = {"parcels": "CAND", "plots": "PLOT"}.get(kind) or (
+                CLASS_PREFIX.get(cid, "FTR") if cid is not None else "FTR"
+            )
             uid = f"{prefix}-{number:06d}"
         if uid in used_uids:
             uid = f"{uid}-{index}"
@@ -560,6 +568,7 @@ class LayerStore:
             geometry_problems=problems,
             has_overlap=has_overlap,
             road_access=road_access,
+            coverage_ratio=_first_number(properties, "coverage_ratio") if kind == "plots" else None,
             sliver_area_m2=self.sliver_area_m2,
             min_parcel_area_m2=self.min_parcel_area_m2,
             road_access_distance_m=self.road_access_distance_m,
@@ -592,7 +601,7 @@ class LayerStore:
                 "qa_flags": assessment["flags"],
             }
         )
-        if kind == "parcels":
+        if kind in ("parcels", "plots"):
             properties["road_access_candidate"] = road_access
 
         return (

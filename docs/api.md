@@ -131,6 +131,7 @@ the file.
 | GET | `/api/map/parcels` | `bbox`, `zoom`, `limit` |
 | GET | `/api/map/features` | `classes` (comma separated), `bbox`, `zoom`, `limit` |
 | GET | `/api/map/gnss` | GNSS points and recorded ground-truth positions |
+| GET | `/api/map/plots` | `bbox`, `zoom`, `limit`: candidate plots (a job source's `plots` layer) |
 | GET | `/api/map/features/{uid}` | `geometry` = `overview` or `detail`, `reasoning` = true or false |
 | GET | `/api/parcels/{parcel_id}` | A candidate parcel with reasoning |
 
@@ -158,16 +159,25 @@ outline.
 | GET | `/api/processing/stages` | The twelve stages, in order |
 | POST | `/api/processing/upload` | Multipart `file` (`.tif` or `.tiff`). Validates the raster and registers a job. `400` wrong type or unreadable, `413` too large, `422` not usable for inference. |
 | POST | `/api/processing/from-dataset/{dataset_id}` | Registers a job for imagery already in the library |
+| POST | `/api/processing/{job_id}/plots` | Builds (or rebuilds) candidate plots for a completed job; `409` otherwise. Status in the job's `summary.plots.status` (`QUEUED`, `RUNNING`, `COMPLETED`, `FAILED`). The job's other layers are not changed. |
+| GET | `/api/processing/models` | `{models, default, note}`. Each model: `id`, `name`, `file`, `trained_on`, `suits`, `licence`, `available`, `reason` (why not, when unavailable), `hash` (first 12 hex digits of SHA-256), `size_bytes`. No server paths. |
 | GET | `/api/processing/{job_id}/area-check` | Whether the image overlaps the current area: `{intersects, distance_km, message, area_id, area_name, image_bbox, matching_areas}` |
-| POST | `/api/processing/{job_id}/start` | Queues the job. Idempotent for a running or finished job. If the image does not overlap the current area, answers `409` with the distance unless `confirm_outside_area=true` is passed. |
+| POST | `/api/processing/{job_id}/start` | Queues the job. Idempotent for a running or finished job. If the image does not overlap the current area, answers `409` with the distance unless `confirm_outside_area=true` is passed. `model_id` chooses the model (default when omitted); an unknown id is `400`, an unavailable one `409`. |
 | GET | `/api/processing/{job_id}` | Job state |
 | GET | `/api/processing/{job_id}/result` | Summary and layer statistics. `409` until the job has completed. |
 
 A job has `job_id`, `status` (`UPLOADED`, `QUEUED`, `PROCESSING`, `COMPLETED`,
 `FAILED`), `stage`, `progress` (0 to 100), `stages` (each with `status`, `fraction`,
 `detail`), `input_dataset`, `output_dataset`, `raster_meta`, `summary`, `error`,
-`surveyor_id`, `assignment_id`, `area_check`, `created_at`, `updated_at`, and `source`
-once completed.
+`surveyor_id`, `assignment_id`, `area_check`, `model`, `created_at`, `updated_at`, and
+`source` once completed.
+
+`model` is `{id, name, file, hash, trained_on, suits, licence}`, recorded when the job
+starts; the file is checked again when the run begins and a changed checkpoint fails the
+job rather than run under the wrong record. Jobs from before models were selectable carry
+the village model with a `note` saying it was recorded afterwards. Their features,
+exports and the source label (`/api/system/status` and `/api/map/layers` → `sources`)
+name the model.
 
 A job belongs to the area that is current when it is **started**: `assignment_id` is
 set then, and `area_check` records whether the image overlapped that area
@@ -228,6 +238,17 @@ area), water, fields, other, road access, mapped area and extent, review counts 
 group and by status, model uncertainty (or the statement that none was recorded), and
 processing status.
 
+`candidate_plots` is counted separately from `candidate_parcels`. `plots` (null when the
+source has none) gives `count`, `area_m2`, `p10_area_m2`, `median_area_m2`,
+`p90_area_m2`, the plots holding exactly one building counted two ways
+(`one_building_seed_rule` and `one_building_share_seed_rule` for buildings of at least
+`PLOT_MIN_BUILDING_M2`, which is 100 % by construction; `one_building_all` and
+`one_building_share_all` for every detected building feature), `low_coverage` (plots
+under 5 % built, flagged), `road_access`, and
+`reference_check`: when an existing GIS layer covers the area, `reference_features`,
+`plots_with_one`, `plots_with_several`, `plots_with_none`, `reference_with_own_plot` and
+`reference_outside_plots` (each reference feature placed by its representative point).
+
 ## Export
 
 | Method | Path | Notes |
@@ -237,7 +258,7 @@ processing status.
 | GET | `/api/export/csv` | Attribute table |
 | GET | `/api/export/gpkg` | GeoPackage; `501` if GeoPandas is not installed |
 
-Parameters: `layer` = `parcels` or `landcover`; `status` = `all`, `verified`,
+Parameters: `layer` = `parcels`, `landcover` or `plots`; `status` = `all`, `verified`,
 `unverified`; `classes` (comma separated, land cover only); `source`.
 
 The file's `metadata` holds the project, assignment, surveyor, processing job, model,

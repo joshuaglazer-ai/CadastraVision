@@ -10,6 +10,7 @@ import { formatDate, formatNumber } from "../../lib/format";
 const LAYERS = [
   { key: "parcels", label: "Candidate parcels" },
   { key: "landcover", label: "Land-cover features (buildings, roads, fields, water, other)" },
+  { key: "plots", label: "Candidate plots (geometric proposal around each building)" },
 ];
 
 const FILTERS = [

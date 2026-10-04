@@ -658,6 +658,7 @@ def run_pipeline(
     road_access_distance_m: float = 5.0,
     report: Report | None = None,
     model_loader: Callable[[Path], tuple[Any, Any]] | None = None,
+    model_info: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Run the whole pipeline. Returns a JSON-serialisable summary."""
 
@@ -673,10 +674,19 @@ def run_pipeline(
         raise PipelineError(f"Input raster not found: {input_path.name}")
 
     # ---- model ----------------------------------------------------------
-    report("LOAD_MODEL", "running", fraction=0.0, detail="Loading U-Net / ResNet34 checkpoint")
+    # Which checkpoint ran is recorded with every output. Without a model
+    # description (direct calls, tests) the architecture label is used.
+    model_info = dict(model_info or {"name": MODEL_LABEL, "file": Path(model_path).name})
+    model_name = model_info.get("name") or MODEL_LABEL
+    model_attributes = {
+        "model_id": model_info.get("id"),
+        "model_file": model_info.get("file"),
+        "model_hash": model_info.get("hash"),
+    }
+    report("LOAD_MODEL", "running", fraction=0.0, detail=f"Loading {model_name}")
     loader = model_loader or get_model
     model, device = loader(Path(model_path))
-    report("LOAD_MODEL", "done", detail=f"{MODEL_LABEL} on {device}")
+    report("LOAD_MODEL", "done", detail=f"{model_name} ({MODEL_LABEL.split(',')[0]}) on {device}")
 
     # ---- raster ---------------------------------------------------------
     report("READ_RASTER", "running", fraction=0.0, detail="Reading georeferencing and bands")
@@ -736,14 +746,15 @@ def run_pipeline(
         "processing_job_id": job_id,
         "source_dataset": source_dataset,
         "generated_at": generated_at,
-        "model": MODEL_LABEL,
+        "model": model_name,
+        "model_info": model_info,
         "normalization": normalization,
         "tile_size": tile_size,
         "tile_overlap": overlap,
         "source_crs": built["source_crs_label"],
         "metric_crs": built["metric_crs_label"],
     }
-    label = {"label": "AI GENERATED / PRELIMINARY"}
+    label = {"label": "AI GENERATED / PRELIMINARY", **model_attributes}
 
     features_path = output_dir / "ai_features.geojson"
     parcels_path = output_dir / "candidate_parcels.geojson"
@@ -758,7 +769,7 @@ def run_pipeline(
         f"candidate_parcels_{job_id}",
         {**metadata, "status": "CANDIDATE PARCEL / AI GENERATED / PRELIMINARY"},
         _features_for_export(
-            built["parcels_metric"], PARCEL_COLUMNS, {"label": "CANDIDATE PARCEL / AI GENERATED / PRELIMINARY"}
+            built["parcels_metric"], PARCEL_COLUMNS, {"label": "CANDIDATE PARCEL / AI GENERATED / PRELIMINARY", **model_attributes}
         ),
     )
 
@@ -795,7 +806,8 @@ def run_pipeline(
         "source_dataset": source_dataset,
         "generated_at": generated_at,
         "device": str(device),
-        "model": MODEL_LABEL,
+        "model": model_name,
+        "model_info": model_info,
         "normalization": normalization,
         "tile_size": tile_size,
         "tile_overlap": overlap,

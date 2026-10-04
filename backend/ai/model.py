@@ -133,16 +133,46 @@ _cache_lock = threading.Lock()
 
 
 def get_model(path: Path | str):
-    """Load once per process and reuse (reloaded if the file changes)."""
+    """Load once per process and reuse (reloaded if the file changes).
+
+    Only one model is held at a time: switching to another checkpoint
+    releases the current one before the next is loaded.
+    """
 
     path = Path(path)
     stamp = (str(path), path.stat().st_mtime, path.stat().st_size) if path.exists() else None
     with _cache_lock:
         if stamp is not None and _cached.get("stamp") == stamp:
             return _cached["model"], _cached["device"]
+        release_model()
         model, device = load_model(path)
-        _cached.update(stamp=stamp, model=model, device=device)
+        _cached.update(stamp=stamp, model=model, device=device, path=str(path))
         return model, device
+
+
+def release_model() -> None:
+    """Drop the cached model and return its memory (GPU memory too)."""
+
+    had_model = _cached.get("model") is not None
+    _cached.clear()
+    if not had_model:
+        return
+    import gc
+
+    gc.collect()
+    try:
+        import torch
+
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    except Exception:  # torch missing or no CUDA: nothing more to free
+        pass
+
+
+def loaded_model_path() -> str | None:
+    """File of the model currently in memory, if any."""
+
+    return _cached.get("path")
 
 
 def model_status(path: Path | str, normalization: str) -> dict[str, Any]:

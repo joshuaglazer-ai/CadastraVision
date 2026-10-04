@@ -116,7 +116,9 @@ export default function ReviewQueue({ source, selectedId, onOpen, refreshKey = 0
                   <StatusBadge status={item.status} size="sm" />
                   <span className="queue__issue">{item.issue}</span>
                   <span className="queue__meta">
-                    <span>{item.layer === "parcels" ? "Candidate parcel" : item.class_name}</span>
+                    <span>
+                      {item.layer === "parcels" ? "Candidate parcel" : item.layer === "plots" ? "Candidate plot" : item.class_name}
+                    </span>
                     <span>{formatArea(item.area_m2, "")}</span>
                     <span>
                       {item.confidence != null

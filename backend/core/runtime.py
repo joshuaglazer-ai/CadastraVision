@@ -129,10 +129,12 @@ def ensure_source(source: str) -> dict[str, Any]:
         files = {
             "parcels": out / "candidate_parcels.geojson",
             "landcover": out / "ai_features.geojson",
+            "plots": out / "candidate_plots.geojson",
         }
         labels = {
             "parcels": f"Candidate parcels ({job_id})",
             "landcover": f"AI features ({job_id})",
+            "plots": f"Candidate plots ({job_id})",
         }
         origin = "processing_job"
     else:
@@ -172,10 +174,13 @@ def known_sources(store: Store | None = None) -> list[dict[str, Any]]:
     for job in store.list_jobs(limit=50):
         if job["status"] != "COMPLETED":
             continue
+        model = job.get("model") or {}
+        model_name = model.get("name") or "model not recorded"
         sources.append(
             {
                 "source": job_source(job["job_id"]),
-                "label": f"AI output · {job['job_id']} · {job['input_dataset']}",
+                "label": f"AI output · {job['job_id']} · {job['input_dataset']} · {model_name}",
+                "model": model or None,
                 "origin": "processing_job",
                 "job_id": job["job_id"],
                 "created_at": job["created_at"],

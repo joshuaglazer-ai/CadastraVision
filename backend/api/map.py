@@ -63,6 +63,23 @@ def map_parcels(
     )
 
 
+@router.get("/map/plots")
+def map_plots(
+    bbox: Optional[str] = Query(default=None),
+    zoom: Optional[float] = Query(default=None, ge=0, le=24),
+    limit: Optional[int] = Query(default=None, ge=1, le=20000),
+    source: str = Depends(source_param),
+    context: SurveyorContext = Depends(current_context),
+    store: Store = Depends(store_dep),
+):
+    """Candidate plots: land assigned to its nearest building (geometric proposal)."""
+
+    return map_service.features(
+        context, settings, store, source=source, layer="plots",
+        bbox=_bbox(bbox), zoom=zoom, limit=limit,
+    )
+
+
 @router.get("/map/features")
 def map_features(
     classes: Optional[str] = Query(default=None, description="Comma-separated class names"),

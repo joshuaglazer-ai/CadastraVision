@@ -201,6 +201,12 @@ class Settings:
     min_candidate_parcel_m2: float = 25.0
     built_cluster_buffer_m: float = 3.0
 
+    # --- candidate plots (morphological tessellation) ---------------------
+    plots_enabled: bool = True
+    plot_limit_m: float = 25.0      # land farther than this from a building is not assigned
+    plot_grid_m: float = 0.10       # working grid for dividing the land
+    plot_min_building_m2: float = 5.0
+
     # --- derived paths ---------------------------------------------------
     # The three required files are resolved on every access (one directory
     # listing), so a file copied in while the server runs is picked up. When
@@ -308,6 +314,10 @@ def load_settings() -> Settings:
         map_feature_limit=_int("MAP_FEATURE_LIMIT", 4000),
         min_candidate_parcel_m2=_float("MIN_CANDIDATE_PARCEL_M2", 25.0),
         built_cluster_buffer_m=_float("BUILT_CLUSTER_BUFFER_M", 3.0),
+        plots_enabled=_bool("PLOTS_ENABLED", True),
+        plot_limit_m=_float("PLOT_LIMIT_M", 25.0),
+        plot_grid_m=_float("PLOT_GRID_M", 0.10),
+        plot_min_building_m2=_float("PLOT_MIN_BUILDING_M2", 5.0),
     )
 
 

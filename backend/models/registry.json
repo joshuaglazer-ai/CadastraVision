@@ -1,0 +1,29 @@
+{
+  "about": "Segmentation checkpoints a processing job can use. Files live in this folder and are never committed. Every model must be a U-Net / ResNet34 with 6 classes and 8-bit RGB input scaled by 1/255.",
+  "models": [
+    {
+      "id": "village",
+      "name": "Village model (SVAMITVA)",
+      "file": "best_weighted_multiclass_unet.pth",
+      "trained_on": "SVAMITVA drone orthoimagery of rural villages",
+      "suits": "village",
+      "licence": "Project checkpoint",
+      "architecture": "unet_resnet34",
+      "classes": 6,
+      "normalization": "scale_255",
+      "default": true
+    },
+    {
+      "id": "urban",
+      "name": "Urban model (UAVPal, Bhopal)",
+      "file": "cadastra_unet_resnet34_uavpal_sep.pth",
+      "trained_on": "Fine-tuned on UAVPal drone imagery of Bhopal, trained to keep touching buildings apart",
+      "suits": "urban",
+      "licence": "CC BY-NC-SA 4.0: research and demo use",
+      "architecture": "unet_resnet34",
+      "classes": 6,
+      "normalization": "scale_255",
+      "default": false
+    }
+  ]
+}

@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from typing import Optional
+
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 
-from backend.ai import pipeline
+from backend.ai import pipeline, registry
 from backend.config import settings
 from backend.core.deps import current_context, service_error, store_dep
 from backend.core.store import Store
@@ -22,6 +24,15 @@ def list_jobs(
 ):
     jobs = store.list_jobs(surveyor_id=context.surveyor_id, limit=limit)
     return {"jobs": [processing_service.public_job(job) for job in jobs]}
+
+
+@router.get("/models")
+def models(context: SurveyorContext = Depends(current_context)):
+    """The checkpoints a job can run with. A missing file is listed as
+    unavailable, with the reason; server paths are never included."""
+
+    listing = registry.list_models(settings)
+    return {"models": listing["models"], "default": listing["default"], "note": listing["note"]}
 
 
 @router.get("/stages")
@@ -65,6 +76,21 @@ def from_dataset(
     return processing_service.public_job(job)
 
 
+@router.post("/{job_id}/plots")
+def build_plots(
+    job_id: str,
+    context: SurveyorContext = Depends(current_context),
+    store: Store = Depends(store_dep),
+):
+    """Build (or rebuild) candidate plots for a completed job. The job's other
+    layers are not changed. Progress: ``summary.plots.status`` on the job."""
+
+    try:
+        return processing_service.public_job(processing_service.build_plots(context, settings, store, job_id))
+    except processing_service.ProcessingError as exc:
+        raise service_error(exc)
+
+
 @router.get("/{job_id}/area-check")
 def area_check(
     job_id: str,
@@ -87,12 +113,15 @@ def start(
     confirm_outside_area: bool = Query(
         default=False, description="Process the image although it does not overlap the current area"
     ),
+    model_id: Optional[str] = Query(
+        default=None, description="Id of a model in the registry (GET /api/processing/models); default if omitted"
+    ),
     context: SurveyorContext = Depends(current_context),
     store: Store = Depends(store_dep),
 ):
     try:
         job = processing_service.start(
-            context, settings, store, job_id, confirm_outside_area=confirm_outside_area
+            context, settings, store, job_id, confirm_outside_area=confirm_outside_area, model_id=model_id
         )
     except processing_service.ProcessingError as exc:
         raise service_error(exc)

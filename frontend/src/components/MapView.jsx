@@ -7,6 +7,7 @@ import {
   getGnssPoints,
   getMapFeatures,
   getMapParcels,
+  getMapPlots,
   getTerrainGrid,
   isCanceled,
 } from "../lib/api";
@@ -14,7 +15,7 @@ import { BASEMAPS, CLASS_STYLE, LANDCOVER_CLASSES, STATUS } from "../lib/constan
 import { bboxString, formatArea } from "../lib/format";
 
 // Drawing order, bottom to top.
-const DRAW_ORDER = ["field", "parcels", "water", "other", "road", "building"];
+const DRAW_ORDER = ["field", "parcels", "plots", "water", "other", "road", "building"];
 
 const INDIA_VIEW = { center: [22.8, 79.5], zoom: 5 };
 
@@ -318,11 +319,12 @@ function FeatureLayers({
 
       onStatus?.({ loading: true, error: "" });
       try {
-        const [parcels, landcover] = await Promise.all([
+        const [parcels, landcover, plots] = await Promise.all([
           wanted.includes("parcels") ? getMapParcels(source, params, abort.signal) : null,
           classes.length
             ? getMapFeatures(source, { ...params, classes: classes.join(",") }, abort.signal)
             : null,
+          wanted.includes("plots") ? getMapPlots(source, params, abort.signal) : null,
         ]);
         if (disposed || abort.signal.aborted) return;
 
@@ -332,6 +334,11 @@ function FeatureLayers({
           setData("parcels", parcels);
           parcels.features.forEach((feature) => next.set(feature.id, feature));
           drawn += parcels.features.length;
+        }
+        if (plots) {
+          setData("plots", plots);
+          plots.features.forEach((feature) => next.set(feature.id, feature));
+          drawn += plots.features.length;
         }
         if (landcover) {
           const byClass = {};

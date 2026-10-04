@@ -60,6 +60,9 @@ async def lifespan(app: FastAPI):
     settings.ensure_dirs()
     store = get_store()
     interrupted = processing_service.recover_interrupted(store)
+    recorded = processing_service.record_default_model(store, settings)
+    if recorded:
+        log.info("Recorded the default model on %s job(s) from before model selection.", recorded)
     if interrupted:
         log.warning("%s processing job(s) were interrupted by the last shutdown.", interrupted)
     if settings.auth_mode == "off":

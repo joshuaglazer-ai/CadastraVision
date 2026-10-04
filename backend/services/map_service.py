@@ -264,7 +264,7 @@ def features_in_area(context: SurveyorContext, source: str) -> int:
     layers = runtime.get_layers()
     runtime.ensure_source(source)
     total = 0
-    for kind in ("parcels", "landcover"):
+    for kind in ("parcels", "landcover", "plots"):
         if layers.layer(source, kind) is None:
             continue
         _, count = layers.query(source, kind, bbox=context.bbox, geometry="none", limit=0)
@@ -308,6 +308,25 @@ def layer_catalog(
             "message": None if parcels else runtime.unavailable_reason("parcels", source),
             "count": parcel_stats["totals"]["features"] if parcel_stats else 0,
             "area_m2": parcel_stats["totals"]["area_m2"] if parcel_stats else None,
+        }
+    )
+
+    plots = indexed.get("plots")
+    plot_stats = layers.stats(source, "plots", bbox=area) if plots else None
+    catalog.append(
+        {
+            "key": "plots",
+            "label": "Candidate plots",
+            "group": "AI-generated",
+            "available": bool(plots),
+            "default_on": True,
+            "message": None if plots else (
+                "Candidate plots are made from a processing job's buildings; none for these layers."
+                if source == runtime.EXISTING_SOURCE
+                else "No candidate plots for this job yet."
+            ),
+            "count": plot_stats["totals"]["features"] if plot_stats else 0,
+            "area_m2": plot_stats["totals"]["area_m2"] if plot_stats else None,
         }
     )
 

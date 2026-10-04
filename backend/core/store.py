@@ -138,11 +138,12 @@ _JOB_JSON = {
     "raster_meta_json": "raster_meta",
     "summary_json": "summary",
     "area_check_json": "area_check",
+    "model_json": "model",
 }
 
 # Columns added after the first release, created on databases that predate them.
 _ADDED_COLUMNS = {
-    "jobs": [("area_check_json", "TEXT")],
+    "jobs": [("area_check_json", "TEXT"), ("model_json", "TEXT")],
 }
 _REVIEW_JSON = {
     "original_geometry_json": "original_geometry",
@@ -291,6 +292,18 @@ class Store:
         with self._connect() as conn:
             rows = conn.execute(query, params).fetchall()
         return [self._job_row(row) for row in rows]  # type: ignore[misc]
+
+    def jobs_without_model(self) -> list[str]:
+        """Jobs that ran (or tried to) before models were recorded. A job that
+        has not started yet gets its model when it starts."""
+
+        with self._connect() as conn:
+            return [
+                row["job_id"]
+                for row in conn.execute(
+                    "SELECT job_id FROM jobs WHERE model_json IS NULL AND status IN ('COMPLETED', 'FAILED')"
+                )
+            ]
 
     def fail_interrupted_jobs(self) -> int:
         """Jobs left running by a previous process cannot be resumed."""

@@ -146,7 +146,7 @@ Backend (`backend/.env`; every variable is optional except the two Supabase valu
 | `FRONTEND_URL`, `CORS_ORIGINS` | localhost | Allowed browser origins |
 | `CADASTRA_DATA_DIR` | `backend/data` | Datasets, layer cache and state database |
 | `CADASTRA_PROCESSING_DIR` | `backend/processing` | Uploaded rasters and job outputs |
-| `CADASTRA_MODEL_PATH` | `backend/models/best_weighted_multiclass_unet.pth` | Checkpoint |
+| `CADASTRA_MODEL_PATH` | `backend/models/best_weighted_multiclass_unet.pth` | The default (village) checkpoint; its folder also holds `registry.json` and the other checkpoints |
 | `MODEL_NORMALIZATION` | `scale_255` | Input scaling; must match training (see architecture notes) |
 | `TILE_SIZE`, `TILE_OVERLAP` | `512`, `64` | Inference window and context margin, in pixels |
 | `POLYGONIZE_CHUNK` | `4096` | Polygonisation chunk, in pixels |
@@ -157,6 +157,10 @@ Backend (`backend/.env`; every variable is optional except the two Supabase valu
 | `MAP_FEATURE_LIMIT` | `4000` | Most features sent to the map per request |
 | `MAX_UPLOAD_MB` | `4096` | Upload size limit |
 | `EXPORT_BACKGROUND` | `false` | Also vectorise the Background class |
+| `PLOTS_ENABLED` | `true` | Build candidate plots after each processing job |
+| `PLOT_LIMIT_M` | `25` | Land farther than this from a building is not assigned to a plot |
+| `PLOT_GRID_M` | `0.10` | Grid on which the land is divided (metres) |
+| `PLOT_MIN_BUILDING_M2` | `5` | Smallest building that gets a plot of its own |
 
 Frontend (`frontend/.env`; everything prefixed `VITE_` is shipped to the browser, so only
 public values belong here):
@@ -167,7 +171,29 @@ public values belong here):
 | `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY` | Supabase project URL and anon key |
 | `VITE_AUTH_MODE` | `off` only together with `CADASTRA_AUTH=off` |
 
-## The model
+## The models
+
+A surveyor chooses the model for each processing job on the Processing page. The choices
+come from `backend/models/registry.json`:
+
+| Id | Name | File (in `backend/models/`) | Suits | Trained on | Licence |
+| --- | --- | --- | --- | --- | --- |
+| `village` (default) | Village model (SVAMITVA) | `best_weighted_multiclass_unet.pth` | village | SVAMITVA drone orthoimagery of rural villages | Project checkpoint |
+| `urban` | Urban model (UAVPal, Bhopal) | `cadastra_unet_resnet34_uavpal_sep.pth` | urban | Fine-tuned on UAVPal drone imagery of Bhopal, trained to keep touching buildings apart | CC BY-NC-SA 4.0: research and demo use |
+
+Both are the same architecture (U-Net / ResNet34, 6 classes, 8-bit RGB scaled by 1/255);
+the registry refuses any entry that is not. A model whose file is not in
+`backend/models/` is listed as unavailable with the reason, never an error. The browser
+sends only a model id; the server finds the file. Only one model is held in memory:
+switching releases the previous one before loading the next.
+
+Each job records the model it ran with (id, file name and the first 12 hex digits of the
+file's SHA-256). Every feature carries `model_id`, `model_file` and `model_hash`; the
+Layers dropdown names the model; GeoJSON, CSV and GeoPackage exports state it. Jobs from
+before models were selectable are recorded as the village model, marked as recorded
+afterwards. The checkpoint files are never committed.
+
+### The village model
 
 `best_weighted_multiclass_unet.pth` is a PyTorch `state_dict` for a U-Net with a ResNet34
 encoder (`segmentation_models_pytorch`), 3 input channels (8-bit RGB) and 6 output
@@ -229,6 +255,65 @@ Run `python -m backend.scripts.selfcheck`, `python -m pytest backend/tests` and
 `npm run build` on your machine first. If any of them fails, that is a defect to fix, not
 a setup problem to work around.
 
+## Candidate plots
+
+Candidate parcels are open-land regions, which suits farmland; inside a settlement they
+say nothing about plots. For that, every processing job also gets **candidate plots**,
+made by morphological tessellation (Fleischmann et al., 2020, a published proxy for plots
+where no cadastre exists):
+
+- every Building feature of at least `PLOT_MIN_BUILDING_M2` (5 m²) is a seed;
+- the land to divide is valid image area that is not Road or Water, within
+  `PLOT_LIMIT_M` (25 m) of a building;
+- each piece of land goes to its nearest building, growing on a `PLOT_GRID_M` (10 cm) grid
+  through land only, so roads and water are walls even where the detected network does not
+  close; each plot is then cut exactly to its building's limit, has the road and water
+  polygons subtracted, and is measured in the local UTM zone like every other feature.
+
+It runs on a completed job's outputs and never changes the job's segmentation, features or
+measurements. It runs automatically after each new job, and for older jobs from the job's
+result on the Processing page ("Build candidate plots"), `POST
+/api/processing/{job_id}/plots`, or `python -m backend.scripts.build_plots <job id>`.
+
+Each plot records its building's feature id, area, perimeter, the building area inside it
+and the coverage ratio, the detected buildings inside it counted two ways
+(`buildings_inside_seed_rule`: buildings of at least 5 m², the rule that gives a building
+a plot; `buildings_inside_all`: every detected building feature), road access and distance,
+its building's mean model confidence, and `delineation_method:
+"morphological_tessellation"`. It is labelled **Candidate plot**, AI GENERATED /
+PRELIMINARY, and starts as review required with the reason "Boundary proposed by
+geometric subdivision around a detected building; not observed in imagery". A plot whose
+building covers under 5 % of it is also flagged "Building covers under 5% of this plot; the
+building or the plot may not be real" (flagged only, never removed). It has its own
+map layer, count in the key figures and analytics, export layer, and the same review
+actions as other features. When the area has an existing GIS layer, Analytics compares the
+plots with it: plots holding exactly one, several or no reference features, and reference
+features with a plot to themselves.
+
+What it gets wrong, measured on the full Uplarshi image (job `JOB-2FEF95C563`, village
+model): 170 plots from 170 buildings, median 252 m² (10th to 90th percentile 46 to
+1,093 m²).
+
+- **It cannot split what the model merged.** The largest plot (2.02 ha) belongs to one
+  "building" of 1.10 ha, a merged cluster of the village core's roofs with 20 detected
+  buildings inside. Any plot is only as good as the building outlines it starts from.
+- **Plots around uncertain small buildings are mostly farmland.** 36 plots are under 5 %
+  built (all flagged); their buildings have median confidence 0.52 (0.67 for all plots), so
+  many are probably not buildings, and the plot is the 25 m of field around them.
+- **Plots holding exactly one building, counted two ways:**
+  - counting buildings of at least 5 m² (the rule that seeds a plot): **100 % (170 of
+    170)**. This is true by construction and says nothing about quality: every such
+    building gets its own plot, so no plot can hold two of them;
+  - counting every detected building feature: **58 % (98 of 170)**. Every extra building
+    counted inside a plot (outside the merged one) is under 5 m², median 1.8 m², with model
+    confidence around 0.4: specks that get no plot of their own, mostly not houses.
+- Boundaries between neighbours are equidistant lines, not observed walls or fences; where
+  a detected road has a gap, a plot can reach through it.
+
+On the Uplarshi centre crop (`JOB-98528EC34E`): 16 plots, median 68 m²; one building per
+plot 100 % counting buildings of at least 5 m², 81 % (13 of 16) counting every detected
+building feature; none under 5 % built. Not yet run on urban imagery with the urban model.
+
 ## Known limitations
 
 ### What the model output supports (measured on the Uplarshi centre crop)
@@ -236,8 +321,9 @@ a setup problem to work around.
 These are properties of what the model produces, measured on job `JOB-98528EC34E`, not
 gaps in the code:
 
-- **Automatic plot boundaries are not supported by this output, so the application does
-  not propose them.** Splitting land blocks into plots needs blocks that hold buildings:
+- **Road-bounded blocks cannot be derived from this output**, so plots are not made by
+  splitting blocks (candidate plots use morphological tessellation instead, which needs no
+  closed blocks; see [Candidate plots](#candidate-plots) for what it gets wrong):
   - The detected roads do not form a closed network. The crop's 64 road features remain
     64 separate pieces, and removing them from the crop leaves **one road-bounded block**
     of 10,847 m² (of 11,932 m²). Widening every road by 1 m or 2 m to close gaps still

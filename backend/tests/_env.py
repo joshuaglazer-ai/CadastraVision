@@ -16,9 +16,15 @@ from pathlib import Path
 ROOT = Path(tempfile.mkdtemp(prefix="cadastra-tests-"))
 DATA_DIR = ROOT / "data"
 PROCESSING_DIR = ROOT / "processing"
+MODELS_DIR = ROOT / "models"
 
 os.environ["CADASTRA_DATA_DIR"] = str(DATA_DIR)
 os.environ["CADASTRA_PROCESSING_DIR"] = str(PROCESSING_DIR)
+# A stand-in default checkpoint (never loaded: the pipeline is mocked in the
+# API tests), so starting a job does not depend on the real 98 MB file.
+MODELS_DIR.mkdir(parents=True, exist_ok=True)
+(MODELS_DIR / "best_weighted_multiclass_unet.pth").write_bytes(b"stand-in village checkpoint for tests")
+os.environ["CADASTRA_MODEL_PATH"] = str(MODELS_DIR / "best_weighted_multiclass_unet.pth")
 os.environ["CADASTRA_AUTH"] = "off"
 os.environ["CADASTRA_ALLOW_DEMO_ASSIGNMENT"] = "true"
 os.environ["SUPABASE_URL"] = ""

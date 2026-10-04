@@ -63,6 +63,16 @@ export default function KPISection({ analytics }) {
         }
       />
       <Kpi
+        icon="shapes"
+        label="Candidate plots"
+        value={a.plots ? count(a.candidate_plots) : <Unavailable>Not built</Unavailable>}
+        note={
+          a.plots && isNumber(a.plots.one_building_share_seed_rule)
+            ? `One building: ${Math.round(a.plots.one_building_share_seed_rule * 100)} % (≥ 5 m²), ${Math.round(a.plots.one_building_share_all * 100)} % (all)`
+            : "Made from a processing job's buildings"
+        }
+      />
+      <Kpi
         icon="building"
         label="Buildings"
         value={count(a.buildings?.count)}

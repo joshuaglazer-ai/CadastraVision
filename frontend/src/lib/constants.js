@@ -10,6 +10,8 @@ export const PRODUCT = {
 // style on the map so that colour is never the only cue.
 export const CLASS_STYLE = {
   parcels: { label: "Candidate parcels", color: "#5fe0e6", fill: "#5fe0e6", fillOpacity: 0.08, weight: 1.4 },
+  // A geometric proposal around a building: thin outline, faint fill.
+  plots: { label: "Candidate plots", color: "#d6a6ff", fill: "#d6a6ff", fillOpacity: 0.06, weight: 1.2 },
   building: { label: "Buildings", color: "#ffb454", fill: "#ffb454", fillOpacity: 0.42, weight: 1 },
   road: { label: "Roads", color: "#c6d2dc", fill: "#c6d2dc", fillOpacity: 0.34, weight: 1 },
   field: { label: "Fields", color: "#86d98f", fill: "#86d98f", fillOpacity: 0.22, weight: 1 },
