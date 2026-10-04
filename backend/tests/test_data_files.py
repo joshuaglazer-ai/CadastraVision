@@ -81,6 +81,13 @@ class ResolveFileTests(TempDirCase):
         described = resolve_file(self.dir / PARCELS_FILE_NAME).describe()
         self.assertNotIn(str(self.dir), str(described))
 
+    def test_short_paths_outside_the_project_lose_their_root(self):
+        # On Linux a temporary folder is only two levels deep ("/tmp/x").
+        from backend.config import display_path
+
+        self.assertEqual(display_path(Path("/tmp/tmpabc")), "tmp/tmpabc")
+        self.assertEqual(display_path(Path("/data")), "data")
+
 
 class SettingsFallbackTests(TempDirCase):
     def test_settings_paths_follow_the_fallback(self):

@@ -125,15 +125,17 @@ def display_path(path: Path) -> str:
     """A path as the operator would type it from the repository root.
 
     Paths outside the repository (for example a ``CADASTRA_DATA_DIR`` on
-    another disk) are shown from their last two components so that server
-    paths are not exposed in API responses.
+    another disk) are shown from their last three components, never with the
+    root or drive, so that server paths are not exposed in API responses.
     """
 
     path = Path(path)
     try:
         return path.resolve().relative_to(BASE_DIR.parent.resolve()).as_posix()
     except ValueError:
-        return Path(*path.parts[-3:]).as_posix() if len(path.parts) >= 3 else path.name
+        # Without the anchor: on Linux "/tmp/x" has parts ("/", "tmp", "x").
+        parts = path.parts[1:] if path.anchor else path.parts
+        return Path(*parts[-3:]).as_posix() if parts else path.name
 
 
 def resolve_file(expected: Path) -> FileResolution:
