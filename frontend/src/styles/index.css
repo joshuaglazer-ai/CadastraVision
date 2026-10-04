@@ -44,6 +44,15 @@
   --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
 
   --nav-h: 58px;
+
+  /* layout: one container and one spacing scale (8, 12, 16, 24, 32) */
+  --container: 1600px;
+  --gutter: 32px;
+  --space-1: 8px;
+  --space-2: 12px;
+  --space-3: 16px;
+  --space-4: 24px;
+  --space-5: 32px;
 }
 
 *,
@@ -407,17 +416,17 @@ textarea {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  padding: 14px 16px;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
   border-bottom: 1px solid var(--line);
 }
 
 .panel__body {
-  padding: 16px;
+  padding: var(--space-3);
 }
 
 .panel__foot {
-  padding: 12px 16px;
+  padding: var(--space-2) var(--space-3);
   border-top: 1px solid var(--line);
 }
 
@@ -749,9 +758,9 @@ textarea {
   z-index: 1200;
   display: flex;
   align-items: center;
-  gap: 18px;
+  gap: var(--space-3);
   height: var(--nav-h);
-  padding: 0 20px;
+  padding: 0 var(--gutter);
   background: rgba(4, 22, 37, 0.82);
   border-bottom: 1px solid var(--line);
   backdrop-filter: blur(16px);
@@ -896,13 +905,19 @@ textarea {
   color: var(--mist);
 }
 
+/* The context strip stays below the top bar instead of sliding under it. */
 .assignment-bar {
+  position: sticky;
+  top: var(--nav-h);
+  z-index: 1100;
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 8px 22px;
-  padding: 9px 20px;
-  background: rgba(6, 30, 49, 0.66);
+  gap: var(--space-1) var(--space-4);
+  padding: var(--space-1) var(--gutter);
+  background: rgba(6, 30, 49, 0.94);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
   border-bottom: 1px solid var(--line);
   font-size: 0.9rem;
 }
@@ -926,23 +941,24 @@ textarea {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: var(--space-1);
   margin-left: auto;
 }
 
 .page {
   flex: 1;
   width: 100%;
-  max-width: 1640px;
+  max-width: calc(var(--container) + 2 * var(--gutter));
   margin: 0 auto;
-  padding: 20px;
+  padding: var(--space-4) var(--gutter);
   display: grid;
-  gap: 18px;
+  gap: var(--space-4);
   align-content: start;
 }
 
+/* Kept for the pages that use it; the container is the same everywhere. */
 .page--wide {
-  max-width: none;
+  max-width: calc(var(--container) + 2 * var(--gutter));
 }
 
 .page-head {
@@ -950,7 +966,7 @@ textarea {
   align-items: flex-end;
   justify-content: space-between;
   flex-wrap: wrap;
-  gap: 12px 20px;
+  gap: var(--space-2) var(--space-4);
 }
 
 .page-head p {
@@ -968,7 +984,7 @@ textarea {
 .subnav {
   display: flex;
   gap: 4px;
-  padding: 0 20px;
+  padding: 0 var(--gutter);
   border-bottom: 1px solid var(--line);
   background: rgba(4, 22, 37, 0.5);
   overflow-x: auto;
@@ -980,7 +996,7 @@ textarea {
 }
 
 .dev-banner {
-  padding: 6px 20px;
+  padding: 6px var(--gutter);
   font-size: 0.86rem;
   color: #2a1c02;
   background: var(--warn);
@@ -988,7 +1004,7 @@ textarea {
 
 .grid {
   display: grid;
-  gap: 16px;
+  gap: var(--space-3);
 }
 
 .grid--2 {
@@ -1005,15 +1021,15 @@ textarea {
 
 .stack {
   display: grid;
-  gap: 12px;
+  gap: var(--space-2);
   align-content: start;
 }
 
-/* Review page: the map takes the window height whatever the zoom, and the
-   queue beside it scrolls instead of stretching the row. */
+/* Review page: the map takes the rest of the window height (set by the
+   page, at least 520 px), and the queue beside it scrolls instead of
+   stretching the row. */
 .review-layout {
-  grid-template-columns: minmax(320px, 420px) minmax(0, 1fr);
-  height: max(560px, calc(100vh - 190px));
+  grid-template-columns: 400px minmax(0, 1fr);
 }
 
 .review-layout > .panel {
@@ -1043,7 +1059,7 @@ textarea {
 /* ------------------------------------------------------------------ KPI */
 .kpi-grid {
   display: grid;
-  grid-template-columns: repeat(8, minmax(0, 1fr));
+  grid-template-columns: repeat(9, minmax(0, 1fr));
   gap: 1px;
   border: 1px solid var(--line);
   border-radius: var(--radius);
@@ -1056,7 +1072,7 @@ textarea {
   display: grid;
   gap: 4px;
   align-content: start;
-  padding: 14px 16px;
+  padding: var(--space-2) var(--space-3);
   background: linear-gradient(180deg, rgba(17, 60, 92, 0.92), rgba(8, 34, 55, 0.94));
   min-width: 0;
 }
@@ -1220,8 +1236,12 @@ textarea {
 }
 
 .layer-control {
-  width: 258px;
+  width: 224px;
   overflow: auto;
+}
+
+.layer-control--closed {
+  width: auto;
 }
 
 /* Leave the bottom edge free for the scale bar and coordinate readout. */
@@ -1605,18 +1625,18 @@ textarea {
 /* ----------------------------------------------------------- review queue */
 .tabs {
   display: flex;
-  gap: 2px;
-  padding: 0 8px;
+  flex-wrap: wrap;
+  gap: 0 2px;
+  padding: 0 var(--space-1);
   border-bottom: 1px solid var(--line);
-  overflow-x: auto;
 }
 
 .tab {
   position: relative;
   display: inline-flex;
   align-items: center;
-  gap: 7px;
-  padding: 11px 11px;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-1);
   color: var(--mist);
   font-weight: 500;
   background: transparent;
@@ -1728,8 +1748,8 @@ textarea {
 
 .dataset-card {
   display: grid;
-  gap: 10px;
-  padding: 14px;
+  gap: var(--space-2);
+  padding: var(--space-3);
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
   background: var(--well);
@@ -2018,42 +2038,87 @@ textarea {
   position: relative;
   z-index: 2;
   display: grid;
-  grid-template-columns: minmax(0, 1.25fr) minmax(360px, 440px);
-  gap: 40px;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 420px;
+  gap: var(--space-5);
   align-items: center;
-  min-height: calc(100vh - 74px);
-  padding: 0 clamp(20px, 5vw, 72px) 48px;
+  max-width: calc(1760px + 2 * var(--gutter));
+  min-height: calc(100vh - 84px);
+  margin: 0 auto;
+  padding: 0 var(--gutter) var(--space-5);
 }
 
 .login__globe {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: -8%;
-  width: 78%;
+  position: relative;
+  inset: auto;
   z-index: 1;
+  width: min(100%, calc(100vh - 180px));
+  aspect-ratio: 1 / 1;
+  justify-self: center;
 }
 
 .login__intro {
   position: relative;
   z-index: 2;
-  align-self: end;
-  padding-bottom: 6vh;
   max-width: 560px;
-  pointer-events: none;
 }
 
 .login__intro h1 {
-  font-size: clamp(2.2rem, 4.2vw, 3.5rem);
+  margin-top: var(--space-3);
+  font-size: clamp(2rem, 2.9vw, 3.2rem);
   font-weight: 600;
   letter-spacing: -0.025em;
-  line-height: 1.04;
+  line-height: 1.08;  text-wrap: balance;
 }
 
 .login__intro p {
-  margin-top: 14px;
-  font-size: 1.08rem;
+  margin-top: var(--space-3);
+  font-size: 1.05rem;
   color: var(--mist);
+}
+
+.login__intro .login__brand {
+  display: grid;
+  gap: 2px;
+  margin-top: 0;
+  font-size: 1rem;
+}
+
+.login__brand strong {
+  color: var(--foam);
+  font-size: 1.15rem;
+  font-weight: 600;
+}
+
+.login__brand span {
+  font-family: var(--font-condensed);
+  font-size: 0.9rem;
+  color: var(--mist);
+}
+
+.login__points {
+  display: grid;
+  gap: var(--space-2);
+  margin: var(--space-4) 0 0;
+  padding: 0;
+  list-style: none;
+  color: var(--mist);
+}
+
+.login__points li {
+  padding-left: var(--space-3);
+  border-left: 2px solid var(--aqua);
+}
+
+.login__points strong {
+  color: var(--foam);
+}
+
+.login__intro .login__motto {
+  margin-top: var(--space-4);
+  font-family: var(--font-condensed);
+  font-size: 0.95rem;
+  color: var(--foam);
+  letter-spacing: 0.02em;
 }
 
 .principle {
@@ -2076,7 +2141,7 @@ textarea {
 .auth-card {
   position: relative;
   z-index: 3;
-  padding: 30px 30px 26px;
+  padding: var(--space-5);
   border: 1px solid var(--line-strong);
   border-radius: 14px;
   background: linear-gradient(180deg, rgba(14, 52, 82, 0.78), rgba(5, 26, 43, 0.86));
@@ -2091,8 +2156,8 @@ textarea {
 
 .auth-card form {
   display: grid;
-  gap: 16px;
-  margin-top: 22px;
+  gap: var(--space-3);
+  margin-top: var(--space-4);
 }
 
 .auth-card__sub {
@@ -2179,14 +2244,28 @@ textarea {
 .section {
   position: relative;
   z-index: 2;
-  padding: 56px clamp(20px, 6vw, 96px);
+  padding: 48px var(--gutter);
   border-top: 1px solid var(--line);
   background: rgba(3, 14, 25, 0.72);
 }
 
 .section > h2 {
   font-size: 1.6rem;
-  max-width: 30ch;
+  max-width: 48ch;
+}
+
+.section > .prose {
+  margin-top: var(--space-3);
+}
+
+.section--lead {
+  border-top: 0;
+  background: transparent;
+  padding-top: var(--space-5);
+}
+
+.section--lead > .prose {
+  margin-top: var(--space-3);
 }
 
 .section > p {
@@ -2212,9 +2291,9 @@ textarea {
   counter-increment: step;
   display: grid;
   grid-template-columns: 26px minmax(0, 1fr);
-  column-gap: 14px;
+  column-gap: var(--space-2);
   align-items: start;
-  padding: 16px 18px;
+  padding: var(--space-3);
   border-top: 1px solid var(--line);
 }
 
@@ -2241,9 +2320,13 @@ textarea {
     grid-template-columns: repeat(7, minmax(0, 1fr));
   }
 
+  .flow--5 {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
+
   .flow li {
     display: block;
-    padding: 18px 16px;
+    padding: var(--space-3);
     border-top: 0;
     border-left: 1px solid var(--line);
   }
@@ -2270,8 +2353,8 @@ textarea {
 .cards {
   display: grid;
   grid-template-columns: 1fr;
-  gap: 14px;
-  margin-top: 26px;
+  gap: var(--space-3);
+  margin-top: var(--space-4);
 }
 
 @media (min-width: 640px) {
@@ -2287,7 +2370,7 @@ textarea {
 }
 
 .card {
-  padding: 18px;
+  padding: var(--space-3);
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: rgba(8, 34, 55, 0.7);
@@ -2330,7 +2413,7 @@ textarea {
 .footer {
   position: relative;
   z-index: 2;
-  padding: 22px clamp(20px, 6vw, 96px);
+  padding: var(--space-4) var(--gutter);
   border-top: 1px solid var(--line);
   background: rgba(2, 10, 19, 0.85);
   font-size: 0.86rem;
@@ -2374,17 +2457,31 @@ textarea {
 }
 
 /* ----------------------------------------------------------- responsive */
-@media (max-width: 1360px) {
+@media (max-width: 1440px) {
+  /* Nine key figures as 5 + 4, the last one wide, never one left alone. */
   .kpi-grid {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(5, minmax(0, 1fr));
   }
 
-  .grid--sidebar {
-    grid-template-columns: minmax(0, 1fr) 340px;
+  .kpi-grid > .kpi:nth-child(9):last-child {
+    grid-column: span 2;
+  }
+
+  /* Leave the map room for the layers panel and the basemap switches. */
+  .review-layout {
+    grid-template-columns: 380px minmax(0, 1fr);
   }
 
   .workbench--with-panel {
-    grid-template-columns: minmax(0, 1fr) 340px;
+    grid-template-columns: minmax(0, 1fr) 360px;
+  }
+}
+
+@media (max-width: 1360px) {
+
+  .login {
+    grid-template-columns: minmax(0, 0.8fr) minmax(0, 1fr) 400px;
+    gap: var(--space-4);
   }
 }
 
@@ -2405,7 +2502,7 @@ textarea {
 
   .review-layout {
     grid-template-columns: minmax(0, 1fr);
-    height: auto;
+    height: auto !important;
   }
 
   .review-layout > .panel {
@@ -2414,6 +2511,10 @@ textarea {
 
   .review-layout > .workbench {
     height: 620px !important;
+  }
+
+  .assignment-bar {
+    position: static;
   }
 
   .workbench--with-panel {
@@ -2429,17 +2530,16 @@ textarea {
   .login {
     grid-template-columns: minmax(0, 1fr);
     align-content: center;
-    gap: 22px;
-  }
-
-  .login__intro {
-    align-self: auto;
-    padding-bottom: 0;
+    gap: var(--space-4);
   }
 
   .login__globe {
+    position: absolute;
+    top: 0;
+    bottom: 0;
     left: -30%;
     width: 160%;
+    aspect-ratio: auto;
     opacity: 0.55;
   }
 
@@ -2463,7 +2563,7 @@ textarea {
   }
 
   .page {
-    padding: 14px;
+    padding: var(--space-3);
   }
 
   .kpi-grid,

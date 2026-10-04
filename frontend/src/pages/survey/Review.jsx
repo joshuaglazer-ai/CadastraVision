@@ -6,6 +6,7 @@ import MapWorkbench from "../../components/MapWorkbench";
 import ReviewQueue from "../../components/ReviewQueue";
 import { useWorkspace } from "../../context/WorkspaceContext";
 import { getAudit } from "../../lib/api";
+import useFillHeight from "../../lib/useFillHeight";
 
 /**
  * Review and verification: the queue on the left, the map and the selected
@@ -17,6 +18,7 @@ export default function Review() {
   const [selectedId, setSelectedId] = useState(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [events, setEvents] = useState(null);
+  const [fillRef, height] = useFillHeight({ min: 520, bottom: 24 });
 
   const loadAudit = useCallback(() => {
     getAudit({ limit: 40 })
@@ -46,8 +48,8 @@ export default function Review() {
         </div>
       </div>
 
-      {/* The map fills the window height; the queue scrolls within it. */}
-      <div className="grid review-layout">
+      {/* The map fills the rest of the window; the queue scrolls within it. */}
+      <div className="grid review-layout" ref={fillRef} style={{ height }}>
         <ReviewQueue
           source={source}
           selectedId={selectedId}

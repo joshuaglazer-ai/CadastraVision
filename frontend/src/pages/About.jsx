@@ -1,90 +1,111 @@
-import { Link } from "react-router-dom";
 import PublicNav from "../components/PublicNav";
-import { useAuth } from "../context/AuthContext";
 import { PRODUCT } from "../lib/constants";
 
+const STEPS = [
+  [
+    "Reads the image.",
+    "Upload a georeferenced drone image. The app checks its coordinate system, resolution and coverage before anything runs.",
+  ],
+  [
+    "Draws the first draft.",
+    "A segmentation model, village or urban as the surveyor chooses, marks buildings, roads, fields, water and other land.",
+  ],
+  [
+    "Turns pixels into a map.",
+    "Shapes are cleaned, repaired and measured in metres. Open land becomes candidate parcels, and each detected building gets a candidate plot.",
+  ],
+  [
+    "Shows where to look.",
+    "Every shape carries the model's confidence and a stated reason when it needs review, so the surveyor starts with the doubtful ones.",
+  ],
+  [
+    "Records the decision.",
+    "The surveyor approves, corrects or rejects each shape and can add ground truth. Every action is logged, and the export says who verified what.",
+  ],
+];
+
 export default function About() {
-  const { authenticated } = useAuth();
   return (
     <div className="public">
       <PublicNav />
 
-      <section className="section" style={{ borderTop: 0, background: "transparent", paddingTop: 34 }}>
+      <section className="section section--lead">
         <h1>About {PRODUCT.name}</h1>
-        <div className="prose" style={{ marginTop: 18 }}>
+        <div className="prose">
           <p>
-            {PRODUCT.name} is a survey-assistance platform built for Smart India Hackathon problem
-            statement 12. It helps a land surveyor get from drone imagery to a checked set of GIS
-            features for an assigned village.
-          </p>
-          <p>
-            <strong>{PRODUCT.principle}</strong> The model suggests where features are. Geometry and
-            topology checks test those suggestions. A surveyor accepts, corrects or rejects each one.
+            {PRODUCT.name} is a surveyor&apos;s assistant for land mapping, and the name of the team that
+            built it. It reads a drone image, draws the first draft of the map, and leaves every decision
+            to the surveyor.
           </p>
         </div>
       </section>
 
       <section className="section">
-        <h2>What the model is</h2>
-        <div className="prose" style={{ marginTop: 14 }}>
+        <h2>The problem</h2>
+        <div className="prose">
           <p>
-            A U-Net with a ResNet34 encoder, trained on SVAMITVA drone orthoimagery. It reads 8-bit
-            RGB tiles of 512 pixels and labels each pixel as one of six classes: background, field,
-            building, road, water or other.
-          </p>
-          <p>
-            It can be run on new survey imagery of a similar kind. How well it does there depends on
-            the place, the sensor, the resolution, the season and the light. That is why every result
-            carries the model's confidence and entropy, and why nothing is final until a surveyor has
-            looked at it.
+            Today a cadastral map starts with a person tracing buildings, roads and plot edges from drone
+            imagery by hand, then checking them on the ground. It is slow, and dense settlements with
+            touching roofs and narrow lanes make it slower.
           </p>
         </div>
       </section>
 
       <section className="section">
-        <h2>What the output is, and is not</h2>
-        <div className="prose" style={{ marginTop: 14 }}>
+        <h2>How {PRODUCT.name} solves it</h2>
+        <ol className="flow flow--5">
+          {STEPS.map(([title, text]) => (
+            <li key={title}>
+              <h3>{title}</h3>
+              <p>{text}</p>
+            </li>
+          ))}
+        </ol>
+      </section>
+
+      <section className="section">
+        <h2>What it is not</h2>
+        <div className="prose">
+          <p>
+            Nothing here is a legal record. Candidate parcels and plots are proposals: plot lines are
+            worked out from the detected buildings and roads, not read from walls or documents. The
+            model&apos;s accuracy changes with place, season and image quality, which is why every result
+            waits for a surveyor.
+          </p>
+        </div>
+      </section>
+
+      <section className="section">
+        <h2>What we have measured (4 October 2026)</h2>
+        <div className="prose">
           <ul>
-            <li>
-              <strong>AI generated features are preliminary.</strong> They are labelled as such on the
-              map, in every panel and in every export.
-            </li>
-            <li>
-              <strong>A candidate parcel is a spatial candidate.</strong> It is a contiguous region
-              the model saw as one field. It is not a cadastral parcel and says nothing about who owns
-              the land.
-            </li>
-            <li>
-              <strong>Uncertainty ranks, it does not judge.</strong> Low confidence is a reason to
-              look at a feature first. It is not proof that the feature is wrong.
-            </li>
-            <li>
-              <strong>Height is measured or absent.</strong> Building height is DSM elevation minus
-              DTM elevation. Without both rasters the 3D view shows flat footprints.
-            </li>
-            <li>
-              <strong>Missing data is shown as missing.</strong> The application does not invent
-              counts, areas, terrain or assignments.
-            </li>
+            <li>Village buildings: IoU 0.92 to 0.94 on held-out SVAMITVA tiles.</li>
+            <li>A full village image of 1 GB: 1,273 valid features in about 14 minutes on a laptop.</li>
+            <li>City buildings in Bhopal: IoU 0.70 with the village model, 0.82 after fine-tuning.</li>
+            <li>Candidate plots in Bhopal: 54% match exactly one hand-drawn building on our test area.</li>
           </ul>
+          <p>Details and limits are in the project README.</p>
         </div>
       </section>
 
       <section className="section">
-        <h2>Where surveyors work</h2>
-        <div className="prose" style={{ marginTop: 14 }}>
-          <ul>
-            <li><strong>Dashboard:</strong> the assignment, key figures, the map and the review queue.</li>
-            <li><strong>Map:</strong> the full 2D GIS map with layer switches, and the 3D terrain view.</li>
-            <li><strong>Datasets:</strong> every data source for the assignment and what is missing.</li>
-            <li><strong>Processing:</strong> upload a GeoTIFF and run the model, stage by stage.</li>
-            <li><strong>Review:</strong> approve, edit, flag or reject features and add ground truth.</li>
-            <li><strong>Analytics and export:</strong> totals from the data, and GIS-ready files.</li>
-          </ul>
+        <h2>Data and credits</h2>
+        <div className="prose">
           <p>
-            <Link to={authenticated ? "/dashboard" : "/login"} className="btn btn--primary" style={{ marginTop: 6 }}>
-              {authenticated ? "Open dashboard" : "Sign in"}
-            </Link>
+            The village model was trained on SVAMITVA drone imagery. The urban model was fine-tuned on
+            UAVPal, drone imagery of Bhopal (DANS Data Station, doi:10.17026/dans-z55-6gt4, CC BY-NC-SA
+            4.0). The background map is for orientation only; the model never reads it.
+          </p>
+        </div>
+      </section>
+
+      <section className="section">
+        <h2>The team</h2>
+        <div className="prose">
+          <p>
+            Built for Smart India Hackathon 2026, problem statement SIH26012: AI-based automated urban
+            parcel mapping and cadastral feature extraction using drone imagery (Department of Land
+            Resources).
           </p>
         </div>
       </section>

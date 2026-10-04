@@ -58,7 +58,7 @@ export default function LayerControl({ catalog, visible, onToggle, defaultOpen =
   }
 
   return (
-    <div className="map-card layer-control">
+    <div className={`map-card layer-control ${open ? "" : "layer-control--closed"}`}>
       <button
         type="button"
         className="layer-control__head"

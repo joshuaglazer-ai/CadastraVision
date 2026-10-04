@@ -49,7 +49,7 @@ export default function ResetPassword() {
     <div className="public">
       <PublicNav />
       <main className="login">
-        <Globe className="login__globe" interactive={false} />
+        <Globe className="login__globe" interactive={false} showLabel={false} />
         <div className="login__intro" />
         <section className="auth-card" aria-labelledby="reset-title">
           <h2 id="reset-title">Set a new password</h2>

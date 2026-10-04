@@ -96,19 +96,33 @@ export default function Login() {
     <div className="public">
       <PublicNav />
       <main className="login">
-        <Globe className="login__globe" />
+        <Globe className="login__globe" showLabel={false} />
 
         <div className="login__intro fade-in">
-          <h1>Earth observation for the survey desk.</h1>
-          <p>
-            Sign in to see your assigned area, the datasets for it, and the AI features waiting for
-            your verification.
+          <p className="login__brand">
+            <strong>{PRODUCT.name}</strong>
+            <span>{PRODUCT.tagline}</span>
           </p>
-          <div className="principle" aria-label="Operating principle">
-            <span>AI proposes</span>
-            <span>GIS validates</span>
-            <span>Surveyors verify</span>
-          </div>
+          <h1>AI draws the first draft. Surveyors have the last word.</h1>
+          <p>
+            {PRODUCT.name} turns a drone image into measured buildings, roads, fields and candidate
+            plots, checks the geometry, and shows the surveyor where to look first.
+          </p>
+          <ul className="login__points">
+            <li>
+              <strong>Traced for you.</strong> Buildings, roads and fields are drawn from the drone
+              image in minutes.
+            </li>
+            <li>
+              <strong>Checked before you see it.</strong> Every shape is measured in metres, repaired
+              if broken, and carries the model&apos;s confidence.
+            </li>
+            <li>
+              <strong>Yours to decide.</strong> Approve, correct or reject each shape. Every decision
+              is recorded.
+            </li>
+          </ul>
+          <p className="login__motto">AI proposes. GIS validates. Surveyors verify.</p>
         </div>
 
         <section className="auth-card fade-in" aria-labelledby="auth-title">

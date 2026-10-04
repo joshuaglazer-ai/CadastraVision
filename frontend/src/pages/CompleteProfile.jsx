@@ -69,7 +69,7 @@ export default function CompleteProfile() {
     <div className="public">
       <PublicNav />
       <main className="login">
-        <Globe className="login__globe" interactive={false} />
+        <Globe className="login__globe" interactive={false} showLabel={false} />
 
         <div className="login__intro fade-in">
           <h1>One more step.</h1>

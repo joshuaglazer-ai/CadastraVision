@@ -101,7 +101,7 @@ export default function Signup() {
     <div className="public">
       <PublicNav />
       <main className="login">
-        <Globe className="login__globe" />
+        <Globe className="login__globe" showLabel={false} />
 
         <div className="login__intro fade-in">
           <h1>Join the survey desk.</h1>
