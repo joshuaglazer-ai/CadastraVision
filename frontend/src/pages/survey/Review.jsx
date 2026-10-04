@@ -46,7 +46,8 @@ export default function Review() {
         </div>
       </div>
 
-      <div className="grid" style={{ gridTemplateColumns: "minmax(320px, 420px) minmax(0, 1fr)" }}>
+      {/* The map fills the window height; the queue scrolls within it. */}
+      <div className="grid review-layout">
         <ReviewQueue
           source={source}
           selectedId={selectedId}
@@ -56,7 +57,7 @@ export default function Review() {
         />
         <MapWorkbench
           source={source}
-          height={720}
+          height="100%"
           selectRequest={selectRequest}
           onReviewed={handleReviewed}
           onSelectionChange={setSelectedId}

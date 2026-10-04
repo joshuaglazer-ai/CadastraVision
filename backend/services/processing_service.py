@@ -416,6 +416,10 @@ def _run(job_id: str, settings: Settings, store: Store) -> None:
             road_access_distance_m=settings.road_access_distance_m,
             report=reporter,
         )
+        if settings.plots_enabled:
+            # Recorded with the completion itself, so a client that sees the
+            # job finish also sees that its plots are on the way.
+            summary = {**summary, "plots": {"status": "QUEUED", "queued_at": utc_now()}}
         store.update_job(
             job_id,
             status="COMPLETED",
@@ -527,6 +531,19 @@ def record_default_model(store: Store, settings: Settings) -> int:
 
 
 def recover_interrupted(store: Store) -> int:
-    """Called at start-up: jobs that were mid-run cannot be resumed."""
+    """Called at start-up: jobs that were mid-run cannot be resumed, and
+    neither can candidate plots that were queued or being built."""
 
+    for job in store.list_jobs(limit=100_000):
+        summary = job.get("summary") or {}
+        if job["status"] == "COMPLETED" and (summary.get("plots") or {}).get("status") in ("QUEUED", "RUNNING"):
+            summary = {
+                **summary,
+                "plots": {
+                    "status": "FAILED",
+                    "finished_at": utc_now(),
+                    "error": "Interrupted by a server restart. Build the candidate plots again.",
+                },
+            }
+            store.update_job(job["job_id"], summary=summary)
     return store.fail_interrupted_jobs()

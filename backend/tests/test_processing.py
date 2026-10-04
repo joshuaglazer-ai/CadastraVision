@@ -175,6 +175,36 @@ class LifecycleTests(ProcessingCase):
         self.assertEqual(self.get(f"/api/processing/{job_id}/result").status_code, 409)
         self.assertIn("job.fail", [event["action"] for event in self.ok("/api/audit")["events"]])
 
+    def test_plots_are_queued_in_the_same_update_that_completes_the_job(self):
+        # A client that sees COMPLETED must also see the plots on their way,
+        # or it stops polling and shows "Not built" until reloaded.
+        seen = {}
+
+        def capture(job_id, settings, store, actor="system"):
+            job = store.get_job(job_id)
+            seen.update(status=job["status"], plots=(job.get("summary") or {}).get("plots"))
+            return {"status": "COMPLETED"}
+
+        job_id = self.create_job()["job_id"]
+        self.addCleanup(runtime.get_layers().drop, f"job:{job_id}")
+        from backend.services import plot_service
+
+        with mock.patch.object(processing_service.pipeline, "run_pipeline", side_effect=fake_pipeline), \
+                mock.patch.object(plot_service, "build_for_job", side_effect=capture):
+            self.client.post(f"/api/processing/{job_id}/start")
+            self.wait_for(job_id)
+
+        self.assertEqual(seen["status"], "COMPLETED")
+        self.assertEqual(seen["plots"]["status"], "QUEUED")
+
+    def test_plots_interrupted_by_a_restart_are_marked_failed(self):
+        job_id = self.create_job()["job_id"]
+        self.store.update_job(job_id, status="COMPLETED", summary={"plots": {"status": "RUNNING"}})
+        processing_service.recover_interrupted(self.store)
+        plots = self.store.get_job(job_id)["summary"]["plots"]
+        self.assertEqual(plots["status"], "FAILED")
+        self.assertIn("restart", plots["error"])
+
     def test_unknown_job(self):
         self.assertEqual(self.get("/api/processing/JOB-NOPE").status_code, 404)
         self.assertEqual(self.client.post("/api/processing/JOB-NOPE/start").status_code, 404)

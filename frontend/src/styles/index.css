@@ -1009,6 +1009,26 @@ textarea {
   align-content: start;
 }
 
+/* Review page: the map takes the window height whatever the zoom, and the
+   queue beside it scrolls instead of stretching the row. */
+.review-layout {
+  grid-template-columns: minmax(320px, 420px) minmax(0, 1fr);
+  height: max(560px, calc(100vh - 190px));
+}
+
+.review-layout > .panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.review-layout > .panel > .panel__body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
 .row {
   display: flex;
   align-items: center;
@@ -2381,6 +2401,19 @@ textarea {
   .grid--sidebar,
   .grid--2 {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .review-layout {
+    grid-template-columns: minmax(0, 1fr);
+    height: auto;
+  }
+
+  .review-layout > .panel {
+    max-height: 520px;
+  }
+
+  .review-layout > .workbench {
+    height: 620px !important;
   }
 
   .workbench--with-panel {

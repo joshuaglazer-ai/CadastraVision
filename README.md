@@ -308,7 +308,35 @@ model): 170 plots from 170 buildings, median 252 m² (10th to 90th percentile 46
   a detected road has a gap, a plot can reach through it.
 
 On the Uplarshi centre crop (`JOB-98528EC34E`): 16 plots, median 68 m², 81 % (13 of 16)
-holding exactly one detected building, none under 5 % built. Not yet run on urban imagery with the urban model.
+holding exactly one detected building, none under 5 % built.
+
+On urban imagery: the Bhopal UAVPal test tiles (job `JOB-93F9B1A441`, urban model,
+1.16 ha work area), checked against 125 reference building footprints supplied for the
+area:
+
+- 130 plots from 130 buildings of at least 5 m², covering 10,673 m²; median 63 m² (10th
+  to 90th percentile 21 to 163 m², largest 444 m²); none under 5 % built; 102 with a road
+  within 5 m.
+- **92 % (120 of 130) hold exactly one detected building. This counts the model's own
+  buildings and is not the figure to quote:** where the model merged several houses into
+  one building, the plot still counts as holding one.
+- **Against the reference footprints** (each placed by an interior point): 70 plots
+  (54 %) hold exactly one, 24 hold several and 36 hold none. Every reference footprint
+  falls inside some plot, but only 70 of the 125 have a plot to themselves. This is the
+  figure to quote.
+- **Why: the building outlines, not the land division.** Only 71 of the 125 reference
+  footprints match a detected building with an overlap (intersection over union) above
+  0.5.
+  - Most plots holding several footprints sit on merged roofs. PLOT-000005 (252 m²) is
+    one detected building of 174 m² over 4 reference houses of 33 to 75 m². The largest
+    plot, PLOT-000001 (444 m²), is a 365 m² detection over 4 reference footprints of 96 to
+    253 m².
+  - Plots holding none are mostly around small detections (8 to 25 m², confidence 0.66 to
+    0.75), likely fragments or not buildings. A few are around large, confident
+    detections with no reference footprint at all: PLOT-000022 (129 m²; building 96 m²,
+    confidence 0.84) overlaps less than 0.5 m² of reference, so either the reference
+    misses a building there or the model took an open surface for a roof. That needs a
+    look at the image.
 
 ## Known limitations
 
