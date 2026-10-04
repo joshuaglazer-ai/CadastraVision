@@ -26,9 +26,18 @@ LOGIN → SURVEYOR → ASSIGNED AREA → DATASETS → AI PROCESSING → SIX-CLAS
 | `backend/` | FastAPI service: authentication, assignment, datasets, AI pipeline, GIS layer index, reviews, analytics, export, terrain |
 | `backend/ai/` | U-Net / ResNet34 model, windowed inference, polygonisation, geometry repair, QA, candidate parcels |
 | `backend/gis/` | GeoJSON reader, CRS handling, metric measurement, indexed layer cache |
-| `backend/tests/` | 240 tests (see [Tests](#tests)) |
+| `backend/tests/` | Backend tests (counts in the note below) |
 | `frontend/` | React + Vite + Leaflet + React Three Fiber application |
 | `docs/` | [architecture](docs/architecture.md), [API](docs/api.md), [deployment](docs/deployment.md) |
+
+<a id="test-counts"></a>**Test counts** (the only place they are stated; 4 October 2026).
+The backend has **285 tests** and the frontend **25**. All 285 backend tests run when
+PyTorch, segmentation-models-pytorch, Rasterio and GeoPandas are installed and the
+checkpoint is in place. Without the checkpoint (as in CI), 284 run and 1 skips. Without
+those four libraries, **223 run** and the other **62 skip themselves**, each printing why
+(for example "GIS stack not installed: No module named 'rasterio'");
+`python -m pytest backend/tests -rs` lists them. (CI's JUnit report counts 308, because it
+also counts the 23 subtests one by one.)
 
 ## Files you must supply
 
@@ -40,7 +49,8 @@ These are not stored in git (they are large, and the repository is public).
 | `candidate_parcels.geojson` (53 MB) | `backend/data/parcels/` | Existing candidate parcel layer |
 | `uplarshi_landcover_with_attributes.geojson` (122 MB) | `backend/data/landcover/` | Existing land-cover layer |
 
-The quickest way to put them there, from a folder where you downloaded them:
+The quickest way to put them there, from a folder where you downloaded them (run it in
+the virtual environment from [Quick start](#quick-start)):
 
 ```bash
 python -m backend.scripts.prepare_data --from ~/Downloads
@@ -70,11 +80,11 @@ Requirements: Python 3.10 or newer, Node.js 22 or newer.
 
 ```bash
 # from the repository root
-python -m venv .venv
+python3 -m venv .venv               # Windows: python -m venv .venv
 source .venv/bin/activate            # Windows: .venv\Scripts\activate
 
 # CPU build of PyTorch (for a GPU, install the CUDA build from pytorch.org instead)
-pip install torch --index-url https://download.pytorch.org/whl/cpu
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
 pip install -r backend/requirements.txt
 
 cp backend/.env.example backend/.env   # then fill in SUPABASE_URL and SUPABASE_KEY
@@ -220,14 +230,29 @@ cd frontend && npm test && npm run build
 
 The backend suite uses a temporary data directory with synthetic layers of known size, so
 it never touches real survey data. Tests that need PyTorch, Rasterio, GeoPandas or the
-checkpoint skip themselves when those are absent and say why.
+checkpoint skip themselves when those are absent and say why; how many is in the
+[test counts](#test-counts) note.
+
+### Platforms
+
+GitHub Actions runs the suite on every push to `cadastra-vision-build`
+([workflow](.github/workflows/ci.yml)). As of 4 October 2026 it passes on the
+`ubuntu-latest`, `macos-latest` and `windows-latest` runners:
+
+- backend tests with Python 3.11 and the CPU build of PyTorch: all pass except the
+  trained-checkpoint test, which skips because the checkpoint is not in git
+  ([counts](#test-counts));
+- frontend lint, tests and production build with Node.js 22;
+- on Ubuntu and macOS only, the [Quick start](#quick-start) commands as written, with the
+  system `python3`: install, model libraries import, the server starts and answers
+  `/health`, and the frontend builds.
 
 ### What has been run, and what has not
 
-On Windows 11 with Python 3.13, PyTorch 2.14 (CPU) and Node.js 22, on 3 October 2026:
+On Windows 11 with Python 3.13, PyTorch 2.14 (CPU) and Node.js 22, on 4 October 2026:
 
-- `python -m pytest backend/tests`: all 240 tests pass against FastAPI, PyTorch,
-  Rasterio, GeoPandas and Shapely, none skipped. This includes model loading, the
+- `python -m pytest backend/tests`: every backend test passes against FastAPI, PyTorch,
+  Rasterio, GeoPandas and Shapely, none skipped ([counts](#test-counts)). This includes model loading, the
   end-to-end pipeline on a synthetic GeoTIFF, polygonisation, geometry repair, DSM/DTM
   heights, the file-name fallback for the three required files, and work areas
   (create, list, edit, delete, activate, isolation between two accounts, rejected
@@ -235,7 +260,7 @@ On Windows 11 with Python 3.13, PyTorch 2.14 (CPU) and Node.js 22, on 3 October 
 - `python -m backend.scripts.selfcheck`: all checks pass, including the real checkpoint
   loaded strictly and run through the whole pipeline on a synthetic GeoTIFF.
 - `python -m backend.scripts.prepare_data --from <downloads folder>` with the real files.
-- `npm test` (22 tests), `npm run lint` and `npm run build`.
+- `npm test`, `npm run lint` and `npm run build`.
 - The home, sign-in and sign-up pages, with the 3D globe, rendered in Chrome.
 - In development mode, driven in Chrome: adding a work area by clicking its corners on
   the map, by uploading a GeoJSON file in UTM, and from the map view; the measurement
@@ -243,8 +268,6 @@ On Windows 11 with Python 3.13, PyTorch 2.14 (CPU) and Node.js 22, on 3 October 
 
 Not yet run:
 
-- The AI pipeline with the real checkpoint on real drone imagery (no orthoimage is in
-  the project; see below).
 - GeoPackage export (no test covers it).
 - Supabase sign-in, account creation, Google sign-in and saving the government
   surveyor ID against a live Supabase project (no test account was available). The sign-up
