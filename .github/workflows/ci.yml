@@ -36,7 +36,20 @@ jobs:
       # Tests that need the checkpoint are skipped; the model architecture is
       # still checked against the checkpoint's tensor manifest.
       - name: Run tests
-        run: python -m pytest backend/tests -ra
+        run: python -m pytest backend/tests -ra --junitxml=pytest-report.xml
+      # Job logs need a sign-in; annotations are public, so failures are
+      # repeated there with their message.
+      - name: Report failing tests as annotations
+        if: failure()
+        run: |
+          python - <<'PY'
+          import xml.etree.ElementTree as ET
+          for case in ET.parse("pytest-report.xml").iter("testcase"):
+              for bad in list(case.findall("failure")) + list(case.findall("error")):
+                  text = (bad.get("message", "") + "\n" + (bad.text or ""))[-1800:]
+                  text = text.replace("%", "%25").replace("\r", "").replace("\n", "%0A")
+                  print(f"::error title={case.get('classname')}.{case.get('name')}::{text}")
+          PY
       - name: API starts
         env:
           CADASTRA_AUTH: "off"
@@ -70,3 +83,36 @@ jobs:
       - run: npm run lint
       - run: npm test
       - run: npm run build
+
+  # The README's Quick start, run as written on a clean macOS and Linux
+  # machine (system python3, no setup-python). The checkpoint is not in
+  # git, so selfcheck reports it missing; the server must still start.
+  readme-setup:
+    name: README setup (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Backend, as in the README
+        run: |
+          python3 -m venv .venv
+          source .venv/bin/activate
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install -r backend/requirements.txt
+          cp backend/.env.example backend/.env
+          python -m backend.scripts.selfcheck || echo "selfcheck exited $? (expected: no checkpoint in CI)"
+          uvicorn backend.main:app --port 8000 &
+          for i in $(seq 1 60); do curl -sf http://localhost:8000/health && break; sleep 2; done
+          curl -sf http://localhost:8000/health
+      - name: Frontend, as in the README
+        run: |
+          cd frontend
+          npm install
+          cp .env.example .env
+          npm run build
