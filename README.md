@@ -296,9 +296,9 @@ Team Cadastra Vision, Smart India Hackathon 2026.
 
 by,
 
-Andy Joshua Bijja
-Shainy Barigala
-Kavya Barigala
-Joyce Angel Manumla
-Natasha Madurai
-Anjum Kaginalli
+Andy Joshua Bijja,
+Shainy Barigala,
+Kavya Barigala,
+Joyce Angel Manumla,
+Natasha Madurai,
+Anjum Kaginalli.
