@@ -293,6 +293,12 @@ tessellation as a way of partitioning space*, Computers, Environment and Urban S
 
 Team Cadastra Vision, Smart India Hackathon 2026.
 
-## Licence
 
-See [LICENSE](LICENSE).
+by,
+
+Andy Joshua Bijja
+Shainy Barigala
+Kavya Barigala
+Joyce Angel Manumla
+Natasha Madurai
+Anjum Kaginalli
