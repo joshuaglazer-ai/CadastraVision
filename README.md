@@ -1,418 +1,298 @@
-# Cadastra Vision
+ Cadastra Vision
 
-**AI + GIS Surveyor Assistance Platform** (Smart India Hackathon, problem statement 12)
+AI + GIS Surveyor Assistance Platform** · Smart India Hackathon 2026 · Problem statement SIH26012
 
 > AI proposes. GIS validates. Surveyors verify.
 
-Cadastra Vision takes a surveyor from sign-in to a GIS-ready export for their assigned
-area: it discovers the datasets for the assignment, runs a six-class segmentation model
-over drone orthoimagery, turns the result into measured GIS features with model-derived
-uncertainty, ranks them for review, records every surveyor decision, and exports the
-result with its verification status.
+Cadastra Vision turns a drone orthoimage into a preliminary, GIS-ready map that a surveyor
+corrects, verifies and exports. It extracts buildings, roads and land cover, turns them into
+measured and validated polygons, proposes candidate parcels and candidate plots, and shows the
+model's own uncertainty on every shape so the surveyor knows where to look first.
 
-**Everything the model produces is AI generated and preliminary. A candidate parcel is a
-spatial candidate for a surveyor to inspect. It is not a legal cadastral ownership
-record.** The application says so on the map, in every panel and in every export.
+**Everything the model produces is AI generated and preliminary. A candidate parcel or candidate
+plot is a proposal for a surveyor to inspect. It is not a legal cadastral ownership record.** The
+app says so on the map, in every panel and in every export.
 
-```
-LOGIN → SURVEYOR → ASSIGNED AREA → DATASETS → AI PROCESSING → SIX-CLASS SEGMENTATION
-      → GIS FEATURES → PARCEL REASONING → QA / UNCERTAINTY → SURVEYOR VERIFICATION → EXPORT
-```
+Problem statement: *AI-Based Automated Urban Parcel Mapping and Cadastral Feature Extraction
+System using Drone Imagery* (Ministry of Rural Development, Department of Land Resources).
 
-## What is in the repository
+## Contents
 
-| Path | Contents |
-| --- | --- |
-| `backend/` | FastAPI service: authentication, assignment, datasets, AI pipeline, GIS layer index, reviews, analytics, export, terrain |
-| `backend/ai/` | U-Net / ResNet34 model, windowed inference, polygonisation, geometry repair, QA, candidate parcels |
-| `backend/gis/` | GeoJSON reader, CRS handling, metric measurement, indexed layer cache |
-| `backend/tests/` | Backend tests (counts in the note below) |
-| `frontend/` | React + Vite + Leaflet + React Three Fiber application |
-| `docs/` | [architecture](docs/architecture.md), [API](docs/api.md), [deployment](docs/deployment.md) |
+- [What it does](#what-it-does)
+- [Measured results](#measured-results)
+- [How it works](#how-it-works)
+- [Repository layout](#repository-layout)
+- [Quick start](#quick-start)
+- [Models](#models)
+- [Tests and CI](#tests-and-ci)
+- [API](#api)
+- [Data and licences](#data-and-licences)
+- [Limitations](#limitations)
+- [Roadmap](#roadmap)
+- [Security](#security)
 
-<a id="test-counts"></a>**Test counts** (the only place they are stated; 4 October 2026).
-The backend has **285 tests** and the frontend **25**. All 285 backend tests run when
-PyTorch, segmentation-models-pytorch, Rasterio and GeoPandas are installed and the
-checkpoint is in place. Without the checkpoint (as in CI), 284 run and 1 skips. Without
-those four libraries, **223 run** and the other **62 skip themselves**, each printing why
-(for example "GIS stack not installed: No module named 'rasterio'");
-`python -m pytest backend/tests -rs` lists them. (CI's JUnit report counts 308, because it
-also counts the 23 subtests one by one.)
+## What it does
 
-## Files you must supply
+A surveyor works through one continuous flow:
 
-These are not stored in git (they are large, and the repository is public).
+1. **Sign in.** Identity and assigned area come from the sign-in, never from a value typed into the app.
+2. **See the assignment.** District, village, assignment status and the boundary on the map.
+3. **Check the datasets.** Each source category shows what exists. A missing dataset is shown as
+   "Not available"; nothing is generated to fill the gap.
+4. **Run AI processing.** Upload a GeoTIFF or pick one from the library, choose the village or urban
+   model, and follow the real processing stages.
+5. **Inspect the map.** Toggle buildings, roads, fields, water, candidate parcels and candidate
+   plots. Click a shape for its area, confidence, entropy and review reason.
+6. **Review.** Approve, edit the outline, flag or reject, or add ground truth observed in the field.
+   Every decision is written to an audit trail.
+7. **Export.** GeoJSON, CSV or GeoPackage, each carrying the model, job, surveyor and verification status.
 
-| File | Put it at | Needed for |
+The 3D view is built to show heights as DSM minus DTM. No DSM or DTM was available, so it states
+that heights are unavailable. It never derives a height from anything else.
+
+## Measured results
+
+Every number below was measured. None is estimated.
+
+| What was measured | Result | Measured on |
 | --- | --- | --- |
-| `best_weighted_multiclass_unet.pth` (98 MB) | `backend/models/` | AI processing |
-| `candidate_parcels.geojson` (53 MB) | `backend/data/parcels/` | Existing candidate parcel layer |
-| `uplarshi_landcover_with_attributes.geojson` (122 MB) | `backend/data/landcover/` | Existing land-cover layer |
+| Building IoU, village model | 0.92 (validation), 0.94 (test) | 138 held-out SVAMITVA patches |
+| Full village orthoimage, end to end | 1.09 GB image → 1,273 valid GIS features over 12.63 ha, on a laptop CPU | Uplarshi orthoimage, run from the app |
+| Geometry | 1,273 of 1,273 valid, no overlaps | Same run |
+| Building IoU in a city, village model as-is | 0.70 | UAVPal (Bhopal), 159 held-out tiles |
+| Building IoU in a city, after fine-tuning | 0.82 | Same tiles |
+| Road IoU in a city | 0.24 → 0.50 | Same tiles |
+| Buildings found as one separate shape | 7% → 30% (154 → 649 of 2,172) | Same tiles, after shared-wall training |
+| Candidate plots holding exactly one hand-drawn building | 54% (70 of 130) | Bhopal test area, 125 hand-drawn buildings |
 
-The quickest way to put them there, from a folder where you downloaded them (run it in
-the virtual environment from [Quick start](#quick-start)):
+What these numbers do not show:
 
-```bash
-python -m backend.scripts.prepare_data --from ~/Downloads
+- **No parcel ground truth exists for either site.** Plots are checked against hand-drawn building
+  outlines. That is a consistency check, not parcel accuracy.
+- **Uplarshi has no ground truth.** Its feature counts and areas describe what the model produced,
+  not how correct it is.
+- **On village data only the building class has measured accuracy.**
+- **City results come from one city.** Water was not learned there.
+- The shared-wall checkpoint, which is the urban model in the app, has building IoU 0.74 and road
+  IoU 0.57. Building IoU is lower than 0.82 because it leaves a gap between touching buildings.
+
+## How it works
+
+```mermaid
+flowchart LR
+  A["Drone orthoimage<br/>(GeoTIFF)"] --> B["Checks and tiling<br/>512 px tiles"]
+  B --> C["AI segmentation<br/>U-Net + ResNet34"]
+  C --> D["Confidence and<br/>entropy per pixel"]
+  D --> E["Polygonise, repair,<br/>measure in UTM"]
+  E --> F["Candidate parcels<br/>and plots"]
+  F --> G["Topology and QA<br/>review priority"]
+  G --> H["Surveyor review<br/>and audit trail"]
+  H --> I["Export<br/>GeoJSON, CSV, GeoPackage"]
 ```
 
-This also recognises browser download names such as `candidate_parcels (2).geojson` and
-`best_weighted_multiclass_unet(2).pth`, copies each file to its place under the clean
-name, builds the layer index, and prints what it copied and what it could not find. It
-never picks between differing copies: if your folder has two different
-`uplarshi_landcover_with_attributes (n).geojson` files, it copies neither and tells you.
+- **Model.** U-Net with a ResNet34 encoder (`segmentation_models_pytorch`), 8-bit RGB input scaled
+  to 0–1, six classes: 0 Background, 1 Field, 2 Building, 3 Road, 4 Water, 5 Other.
+- **Large images.** The raster is read in 512 px windows with a 32 px context margin, so a 1 GB
+  orthoimage runs on a laptop without being loaded whole.
+- **Uncertainty.** Confidence is the highest class probability at each pixel. Entropy is the spread
+  of the class probabilities, in nats. Both are averaged per feature and drive review priority.
+- **Measurement.** The CRS is read from each file and never assumed. Areas and perimeters are
+  measured in the local UTM zone; layers are transformed to EPSG:4326 only for web display.
+- **Geometry.** Regions under the 1 m² minimum mapping unit are merged into their neighbour.
+  Invalid shapes are repaired, and every feature records its geometry status.
+- **Candidate plots.** One plot per detected building by morphological tessellation: space is
+  divided by nearest building, with roads and water as barriers. Plot lines are geometric
+  proposals, not observed walls.
+- **Review priority.** High, Medium or Low, from low confidence, high entropy and the topology
+  checks. The thresholds are starting values and are not yet calibrated against surveyor decisions.
 
-If a file sits in its folder under another name, the backend uses it as long as it is the
-only file of that type there. With several candidates it uses none, and the layer
-control, the Datasets page and `/api/system/status` say which file is expected and
-which files are in the way.
+More detail: [docs/architecture.md](docs/architecture.md).
 
-Optional datasets go in `backend/data/imagery/`,
-`satellite/`, `dsm/`, `dtm/`, `land_records/`, `gis/`, `survey_of_india/`, `documents/`
-and `gnss/`, or are uploaded from the Datasets page. A category with no file is shown as
-**Not available**; nothing is generated to fill it.
+## Repository layout
+
+```
+.github/workflows/ci.yml   CI on Linux, macOS and Windows
+docs/                      api.md, architecture.md, deployment.md
+backend/
+  main.py, config.py       FastAPI app and settings
+  api/                     route handlers
+  services/                business logic: processing, plots, reviews, export
+  ai/                      model, inference, polygonising, repair, QA, plots
+  gis/                     GeoJSON, CRS, measurement, layer index
+  core/                    authentication, store, runtime
+  scripts/                 selfcheck, prepare_data, build_plots
+  models/                  registry.json and a README (checkpoints are not in git)
+  data/                    empty data folders and the demo assignment registry
+  tests/                   backend test suite
+frontend/
+  src/pages/               Home, About, Login, Signup, Dashboard, Map, survey workspace
+  src/components/          map, panels, review queue, globe, KPI cards
+  src/lib/, src/context/   API client, formatting, hooks; auth and workspace state
+```
 
 ## Quick start
 
-Requirements: Python 3.10 or newer, Node.js 22 or newer.
+Requirements: Python 3.10 or newer, Node.js, and a Supabase project for sign-in.
 
-### 1. Backend
+### Backend
+
+From the repository root:
 
 ```bash
-# from the repository root
-python3 -m venv .venv               # Windows: python -m venv .venv
-source .venv/bin/activate            # Windows: .venv\Scripts\activate
-
-# CPU build of PyTorch (for a GPU, install the CUDA build from pytorch.org instead)
+python3 -m venv .venv                 # Windows: python -m venv .venv
+source .venv/bin/activate             # Windows: .venv\Scripts\activate
 pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
 pip install -r backend/requirements.txt
-
-cp backend/.env.example backend/.env   # then fill in SUPABASE_URL and SUPABASE_KEY
-
-python -m backend.scripts.selfcheck    # checks packages, the checkpoint, the pipeline, the layers
+cp backend/.env.example backend/.env  # then fill in SUPABASE_URL and SUPABASE_KEY
+python -m backend.scripts.prepare_data --from ~/Downloads   # copies in the checkpoint and the two GeoJSON layers
+python -m backend.scripts.selfcheck
 uvicorn backend.main:app --reload --port 8000
 ```
 
-The first start indexes the two GeoJSON layers (about half a minute); later starts reuse
-the cache. API documentation is served at <http://localhost:8000/docs>.
-
-### 2. Frontend
+### Frontend
 
 ```bash
 cd frontend
 npm install
-cp .env.example .env                   # then fill in VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY
-npm run dev                            # http://localhost:5173
+cp .env.example .env                  # then fill in VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY
+npm run dev                           # http://localhost:5173
 ```
 
-### 3. Accounts, sign-in and work areas
+### Running without Supabase
 
-Authentication uses Supabase. A surveyor either creates an account on **Create an
-account** (`/signup`: full name, government surveyor ID, e-mail, password of at least 8
-characters) or uses **Continue with Google**. E-mail sign-up must be enabled in the
-Supabase project, and Google sign-in needs the Google provider configured there
-([docs/deployment.md](docs/deployment.md#sign-in-with-google)). With e-mail confirmation
-on, a new e-mail account opens the link sent to it before signing in.
+For local development only, set `CADASTRA_AUTH=off` in `backend/.env` and `VITE_AUTH_MODE=off` in
+`frontend/.env`. Every screen then shows a development-session notice.
 
-Every account must enter a **government surveyor ID** before the workspace opens; a
-Google account is asked for it once, after its first sign-in. The ID is stored in the
-account's Supabase profile and is **self-declared**: nothing checks it against a
-government register, and the application labels it so.
+### Files you must supply
 
-On the **Survey workspace** page a surveyor manages their **work areas**: draw a
-boundary on the map, upload it as a GeoJSON file, or take the current map view as a
-rough rectangle; then name it and give its state, district, taluk and village. The
-server checks the boundary and measures it. Work areas are labelled **SELF-DECLARED WORK
-AREA** everywhere, including exports; they are not official assignments. A switcher in
-the bar under the navigation moves between the account's areas, and the map, key
-figures, review queue and analytics follow the current one.
+Model weights and survey data are not in this repository. It is public, and they are large.
 
-Official assignments come from `backend/data/surveyors/surveyor_assignments.geojson`:
-an administrator lists the surveyor's sign-in e-mail under `assigned_to`. They are
-labelled ASSIGNED and are read-only in the app. Each account sees only its own work
-areas and the registry assignments for its e-mail. An account with neither sees the
-DEMO assignment when `CADASTRA_ALLOW_DEMO_ASSIGNMENT=true`; with `false` (recommended for
-production) it sees "No work area yet. Add one to begin."
-
-To try the application without Supabase, run both halves in the explicit development
-mode. Every screen then carries a "Development session" banner, and the sign-up page
-says that account creation is unavailable in this mode.
-
-```bash
-# backend/.env            # frontend/.env
-CADASTRA_AUTH=off         VITE_AUTH_MODE=off
-```
-
-## Environment variables
-
-Backend (`backend/.env`; every variable is optional except the two Supabase values):
-
-| Variable | Default | Meaning |
-| --- | --- | --- |
-| `SUPABASE_URL` | none | Supabase project URL |
-| `SUPABASE_KEY` | none | Supabase **anon** key. Never a service-role key. |
-| `CADASTRA_AUTH` | `supabase` | `supabase` verifies every request; `off` is local development only |
-| `CADASTRA_ALLOW_DEMO_ASSIGNMENT` | `true` | Users with no assignment see the registry's demo assignment, labelled DEMO |
-| `FRONTEND_URL`, `CORS_ORIGINS` | localhost | Allowed browser origins |
-| `CADASTRA_DATA_DIR` | `backend/data` | Datasets, layer cache and state database |
-| `CADASTRA_PROCESSING_DIR` | `backend/processing` | Uploaded rasters and job outputs |
-| `CADASTRA_MODEL_PATH` | `backend/models/best_weighted_multiclass_unet.pth` | The default (village) checkpoint; its folder also holds `registry.json` and the other checkpoints |
-| `MODEL_NORMALIZATION` | `scale_255` | Input scaling; must match training (see architecture notes) |
-| `TILE_SIZE`, `TILE_OVERLAP` | `512`, `64` | Inference window and context margin, in pixels |
-| `POLYGONIZE_CHUNK` | `4096` | Polygonisation chunk, in pixels |
-| `SIEVE_MIN_PIXELS` | derived | Specks smaller than this many pixels are merged into the neighbouring class before polygonising. Unset: `SLIVER_AREA_M2` divided by the true ground area of one pixel (1,468 px for the 2.6 cm Uplarshi orthomosaic). Set it only to override. |
-| `SLIVER_AREA_M2` | `1.0` | Minimum mapping unit; smaller features are fragments |
-| `MIN_CANDIDATE_PARCEL_M2` | `25` | Minimum size counted as a candidate parcel |
-| `ROAD_ACCESS_DISTANCE_M` | `5` | A road within this distance counts as road access |
-| `MAP_FEATURE_LIMIT` | `4000` | Most features sent to the map per request |
-| `MAX_UPLOAD_MB` | `4096` | Upload size limit |
-| `EXPORT_BACKGROUND` | `false` | Also vectorise the Background class |
-| `PLOTS_ENABLED` | `true` | Build candidate plots after each processing job |
-| `PLOT_LIMIT_M` | `25` | Land farther than this from a building is not assigned to a plot |
-| `PLOT_GRID_M` | `0.10` | Grid on which the land is divided (metres) |
-| `PLOT_MIN_BUILDING_M2` | `5` | Smallest building that gets a plot of its own |
-
-Frontend (`frontend/.env`; everything prefixed `VITE_` is shipped to the browser, so only
-public values belong here):
-
-| Variable | Meaning |
+| File | Where it goes |
 | --- | --- |
-| `VITE_API_URL` | Backend URL, default `http://localhost:8000` |
-| `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY` | Supabase project URL and anon key |
-| `VITE_AUTH_MODE` | `off` only together with `CADASTRA_AUTH=off` |
+| Village checkpoint and the two Uplarshi GeoJSON layers | Copied into place by `python -m backend.scripts.prepare_data` |
+| Urban checkpoint (`.pth`) | `backend/models/`, listed in `backend/models/registry.json` |
+| Other imagery (GeoTIFF) and reference layers (GeoJSON) | Uploaded through the Datasets or Processing page |
 
-## The models
+### Environment variables
 
-A surveyor chooses the model for each processing job on the Processing page. The choices
-come from `backend/models/registry.json`:
+The main ones are below. `backend/.env.example` and `frontend/.env.example` list all of them.
 
-| Id | Name | File (in `backend/models/`) | Suits | Trained on | Licence |
-| --- | --- | --- | --- | --- | --- |
-| `village` (default) | Village model (SVAMITVA) | `best_weighted_multiclass_unet.pth` | village | SVAMITVA drone orthoimagery of rural villages | Project checkpoint |
-| `urban` | Urban model (UAVPal, Bhopal) | `cadastra_unet_resnet34_uavpal_sep.pth` | urban | Fine-tuned on UAVPal drone imagery of Bhopal, trained to keep touching buildings apart | CC BY-NC-SA 4.0: research and demo use |
+| Variable | Where | Meaning |
+| --- | --- | --- |
+| `SUPABASE_URL`, `SUPABASE_KEY` | Backend | Supabase project URL and **anon** key. Never a service-role key. |
+| `CADASTRA_AUTH` | Backend | `supabase` verifies every request. `off` is for local development only. |
+| `VITE_API_URL` | Frontend | Backend URL, default `http://localhost:8000` |
+| `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY` | Frontend | Public values only. Everything prefixed `VITE_` is shipped to the browser. |
 
-Both are the same architecture (U-Net / ResNet34, 6 classes, 8-bit RGB scaled by 1/255);
-the registry refuses any entry that is not. A model whose file is not in
-`backend/models/` is listed as unavailable with the reason, never an error. The browser
-sends only a model id; the server finds the file. Only one model is held in memory:
-switching releases the previous one before loading the next.
+Never commit a real `.env` file.
 
-Each job records the model it ran with (id, file name and the first 12 hex digits of the
-file's SHA-256). Every feature carries `model_id`, `model_file` and `model_hash`; the
-Layers dropdown names the model; GeoJSON, CSV and GeoPackage exports state it. Jobs from
-before models were selectable are recorded as the village model, marked as recorded
-afterwards. The checkpoint files are never committed.
+## Models
 
-### The village model
+A model registry (`backend/models/registry.json`) lets the surveyor pick the checkpoint for the
+settlement type. The choice is stored on the job and written into every export.
 
-`best_weighted_multiclass_unet.pth` is a PyTorch `state_dict` for a U-Net with a ResNet34
-encoder (`segmentation_models_pytorch`), 3 input channels (8-bit RGB) and 6 output
-classes: 0 Background, 1 Field, 2 Building, 3 Road, 4 Water, 5 Other. It was trained on
-SVAMITVA drone orthoimagery.
+| Checkpoint | Trained on | Use it for |
+| --- | --- | --- |
+| Village | SVAMITVA drone orthoimagery | Rural settlements and farmland |
+| Urban | The village model, fine-tuned on UAVPal (Bhopal) drone tiles | Dense city blocks |
 
-The model can be run on new survey imagery of a similar kind. How well it does there
-varies with geography, sensor, resolution, season, illumination and image quality. For
-that reason every feature carries the model's confidence and entropy, features are ranked
-for review, and nothing is final until a surveyor has looked at it.
+One model did not serve both: the urban checkpoint's building IoU on village tiles fell to 0.53,
+from 0.93 for the village model.
 
-Imagery requirements: GeoTIFF, georeferenced with a CRS, north-up, 8-bit RGB (an alpha
-band or a NoData value is used as the valid-pixel mask; without either, pure black is
-treated as NoData). Centimetre-level drone orthoimagery is what the model was trained on;
-coarser imagery is accepted with a warning.
+Imagery the pipeline accepts: a georeferenced, north-up GeoTIFF with a CRS and 8-bit RGB bands.
+Centimetre-level drone orthoimagery is what the models were trained on. A checkpoint that does not
+match the architecture fails with a clear error; there is no fallback model.
 
-## Tests
+## Tests and CI
 
 ```bash
 pip install -r backend/requirements-dev.txt
-python -m pytest backend/tests            # or: python -m unittest discover -s backend/tests -t .
-cd frontend && npm test && npm run build
+python -m pytest backend/tests
+cd frontend && npm run lint && npm test && npm run build
 ```
 
-The backend suite uses a temporary data directory with synthetic layers of known size, so
-it never touches real survey data. Tests that need PyTorch, Rasterio, GeoPandas or the
-checkpoint skip themselves when those are absent and say why; how many is in the
-[test counts](#test-counts) note.
+- 285 backend tests and 25 frontend tests.
+- CI runs on Linux, macOS and Windows. One backend test is skipped there because it needs the
+  trained checkpoint, which is not in git.
+- CI also runs the setup commands in this README on Linux and macOS.
+- The backend tests use a temporary data directory with synthetic layers, so they never touch real
+  survey data.
 
-### Platforms
+## API
 
-GitHub Actions runs the suite on every push to `cadastra-vision-build`
-([workflow](.github/workflows/ci.yml)). As of 4 October 2026 it passes on the
-`ubuntu-latest`, `macos-latest` and `windows-latest` runners:
+Every endpoint except `/health` and `/` needs a Supabase access token. The surveyor and assignment
+are derived from that token; no endpoint accepts a surveyor ID from the client.
 
-- backend tests with Python 3.11 and the CPU build of PyTorch: all pass except the
-  trained-checkpoint test, which skips because the checkpoint is not in git
-  ([counts](#test-counts));
-- frontend lint, tests and production build with Node.js 22;
-- on Ubuntu and macOS only, the [Quick start](#quick-start) commands as written, with the
-  system `python3`: install, model libraries import, the server starts and answers
-  `/health`, and the frontend builds.
+| Group | Base path |
+| --- | --- |
+| System | `/health`, `/api/system/status` |
+| Surveyor and work areas | `/api/surveyors/me`, `/api/assignments` |
+| Datasets | `/api/datasets` |
+| Map | `/api/map` |
+| AI processing | `/api/processing` |
+| Reviews and audit | `/api/reviews`, `/api/audit` |
+| Analytics | `/api/analytics` |
+| Export | `/api/export` |
+| Terrain | `/api/terrain` |
 
-### What has been run, and what has not
+Full reference: [docs/api.md](docs/api.md), or the interactive docs at
+`http://localhost:8000/docs` while the backend is running.
 
-On Windows 11 with Python 3.13, PyTorch 2.14 (CPU) and Node.js 22, on 4 October 2026:
+## Data and licences
 
-- `python -m pytest backend/tests`: every backend test passes against FastAPI, PyTorch,
-  Rasterio, GeoPandas and Shapely, none skipped ([counts](#test-counts)). This includes model loading, the
-  end-to-end pipeline on a synthetic GeoTIFF, polygonisation, geometry repair, DSM/DTM
-  heights, the file-name fallback for the three required files, and work areas
-  (create, list, edit, delete, activate, isolation between two accounts, rejected
-  geometry, precedence of the current area, audit entries).
-- `python -m backend.scripts.selfcheck`: all checks pass, including the real checkpoint
-  loaded strictly and run through the whole pipeline on a synthetic GeoTIFF.
-- `python -m backend.scripts.prepare_data --from <downloads folder>` with the real files.
-- `npm test`, `npm run lint` and `npm run build`.
-- The home, sign-in and sign-up pages, with the 3D globe, rendered in Chrome.
-- In development mode, driven in Chrome: adding a work area by clicking its corners on
-  the map, by uploading a GeoJSON file in UTM, and from the map view; the measurement
-  shown is the server's; the list, the area switcher and the labels.
+| Data | Use |
+| --- | --- |
+| SVAMITVA drone orthoimagery | Village model training and evaluation; the full village run |
+| UAVPal (Bhopal), 2.2 cm drone imagery with hand-drawn labels | Urban fine-tuning and evaluation; reference building outlines |
 
-Not yet run:
+UAVPal is licensed CC BY-NC-SA 4.0 and is used here for non-commercial research:
+*UAVPal, DANS Data Station Physical and Technical Sciences,
+[doi:10.17026/dans-z55-6gt4](https://doi.org/10.17026/dans-z55-6gt4)*. The urban checkpoint and
+the Bhopal files derived from it are kept out of this repository.
 
-- GeoPackage export (no test covers it).
-- Supabase sign-in, account creation, Google sign-in and saving the government
-  surveyor ID against a live Supabase project (no test account was available). The sign-up
-  error messages are written from Supabase's documented error codes and are unit-tested
-  as such, not observed from a live project.
+Candidate plots follow Fleischmann, Feliciotti, Romice and Porta (2020), *Morphological
+tessellation as a way of partitioning space*, Computers, Environment and Urban Systems 80,
+[doi:10.1016/j.compenvurbsys.2019.101441](https://doi.org/10.1016/j.compenvurbsys.2019.101441).
 
-Run `python -m backend.scripts.selfcheck`, `python -m pytest backend/tests` and
-`npm run build` on your machine first. If any of them fails, that is a defect to fix, not
-a setup problem to work around.
+## Limitations
 
-## Candidate plots
+- **Touching buildings merge.** In the city, 30% of buildings come out as their own shape. In the
+  village core, neighbouring roofs form one large "building".
+- **Plot lines are inferred, not observed.** On the Bhopal test area 54% of plots hold exactly one
+  hand-drawn building.
+- **Courtyards and shadows.** The village model marks some bare courtyards as building and some
+  shadows as water. Uplarshi has no ground truth, so this is seen but not measured.
+- **Tile seams.** Class and confidence can change along straight lines where tiles meet.
+- **Roads are disconnected.** Detected road pieces do not form a connected network.
+- **Land cover, not land use.** The six classes describe what covers the ground.
+- **Review thresholds are uncalibrated.**
+- **Missing inputs.** No DSM/DTM, GNSS feed or authoritative parcel layer was available. Those
+  paths are built but not demonstrated.
+- **Editing.** Vertex editing of single polygons only; drawing a new polygon is not implemented.
+- **Deployment.** Runs locally on one machine with SQLite. It is not deployed as a hosted service.
 
-Candidate parcels are open-land regions, which suits farmland; inside a settlement they
-say nothing about plots. For that, every processing job also gets **candidate plots**,
-made by morphological tessellation (Fleischmann et al., 2020, a published proxy for plots
-where no cadastre exists):
+## Roadmap
 
-- every Building feature of at least `PLOT_MIN_BUILDING_M2` (5 m²) is a seed;
-- the land to divide is valid image area that is not Road or Water, within
-  `PLOT_LIMIT_M` (25 m) of a building;
-- each piece of land goes to its nearest building, growing on a `PLOT_GRID_M` (10 cm) grid
-  through land only, so roads and water are walls even where the detected network does not
-  close; each plot is then cut exactly to its building's limit, has the road and water
-  polygons subtracted, and is measured in the local UTM zone like every other feature.
+- A boundary class in the training labels (compound walls, plot edges) and DSM edges, so plot lines
+  are observed rather than inferred.
+- Instance segmentation for buildings.
+- Road network completion.
+- Blended overlapping tiles to remove seams.
+- Threshold calibration against surveyor decisions.
+- Labelled Indian urban orthoimagery from several cities, with one checkpoint per settlement type.
+- Land-use classes, CORS / GNSS receiver import, and an Indian-language interface.
 
-It runs on a completed job's outputs and never changes the job's segmentation, features or
-measurements. It runs automatically after each new job, and for older jobs from the job's
-result on the Processing page ("Build candidate plots"), `POST
-/api/processing/{job_id}/plots`, or `python -m backend.scripts.build_plots <job id>`.
+## Security
 
-Each plot records its building's feature id, area, perimeter, the building area inside it
-and the coverage ratio, the number of detected buildings inside (any size), road access
-and distance,
-its building's mean model confidence, and `delineation_method:
-"morphological_tessellation"`. It is labelled **Candidate plot**, AI GENERATED /
-PRELIMINARY, and starts as review required with the reason "Boundary proposed by
-geometric subdivision around a detected building; not observed in imagery". A plot whose
-building covers under 5 % of it is also flagged "Building covers under 5% of this plot; the
-building or the plot may not be real" (flagged only, never removed). It has its own
-map layer, count in the key figures and analytics, export layer, and the same review
-actions as other features. When the area has an existing GIS layer, Analytics compares the
-plots with it: plots holding exactly one, several or no reference features, and reference
-features with a plot to themselves.
+- Only the Supabase anon key is used. No service-role key belongs in this project.
+- Keys live in `.env` files that are not committed.
+- Uploads are restricted by file type and size, and validated before use.
+- Model weights, GeoTIFFs, survey GeoJSON layers and databases stay out of git.
 
-What it gets wrong, measured on the full Uplarshi image (job `JOB-2FEF95C563`, village
-model): 170 plots from 170 buildings, median 252 m² (10th to 90th percentile 46 to
-1,093 m²).
+## Team
 
-- **It cannot split what the model merged.** The largest plot (2.02 ha) belongs to one
-  "building" of 1.10 ha, a merged cluster of the village core's roofs with 20 detected
-  buildings inside. Any plot is only as good as the building outlines it starts from.
-- **Plots around uncertain small buildings are mostly farmland.** 36 plots are under 5 %
-  built (all flagged); their buildings have median confidence 0.52 (0.67 for all plots), so
-  many are probably not buildings, and the plot is the 25 m of field around them.
-- **58 % of plots (98 of 170) hold exactly one detected building.** Every extra building
-  counted inside a plot (outside the merged one) is under 5 m², median 1.8 m², with model
-  confidence around 0.4: specks that get no plot of their own, mostly not houses. The share
-  counting only buildings of at least 5 m² is not reported because it is 100 % by
-  construction: each such building seeds its own plot, so no plot can hold two of them.
-- Boundaries between neighbours are equidistant lines, not observed walls or fences; where
-  a detected road has a gap, a plot can reach through it.
+Team Cadastra Vision, Smart India Hackathon 2026.
 
-On the Uplarshi centre crop (`JOB-98528EC34E`): 16 plots, median 68 m², 81 % (13 of 16)
-holding exactly one detected building, none under 5 % built.
+## Licence
 
-On urban imagery: the Bhopal UAVPal test tiles (job `JOB-93F9B1A441`, urban model,
-1.16 ha work area), checked against 125 reference building footprints supplied for the
-area:
-
-- 130 plots from 130 buildings of at least 5 m², covering 10,673 m²; median 63 m² (10th
-  to 90th percentile 21 to 163 m², largest 444 m²); none under 5 % built; 102 with a road
-  within 5 m.
-- **92 % (120 of 130) hold exactly one detected building. This counts the model's own
-  buildings and is not the figure to quote:** where the model merged several houses into
-  one building, the plot still counts as holding one.
-- **Against the reference footprints** (each placed by an interior point): 70 plots
-  (54 %) hold exactly one, 24 hold several and 36 hold none. Every reference footprint
-  falls inside some plot, but only 70 of the 125 have a plot to themselves. This is the
-  figure to quote.
-- **Why: the building outlines, not the land division.** Only 71 of the 125 reference
-  footprints match a detected building with an overlap (intersection over union) above
-  0.5.
-  - Most plots holding several footprints sit on merged roofs. PLOT-000005 (252 m²) is
-    one detected building of 174 m² over 4 reference houses of 33 to 75 m². The largest
-    plot, PLOT-000001 (444 m²), is a 365 m² detection over 4 reference footprints of 96 to
-    253 m².
-  - Plots holding none are mostly around small detections (8 to 25 m², confidence 0.66 to
-    0.75), likely fragments or not buildings. A few are around large, confident
-    detections with no reference footprint at all: PLOT-000022 (129 m²; building 96 m²,
-    confidence 0.84) overlaps less than 0.5 m² of reference, so either the reference
-    misses a building there or the model took an open surface for a roof. That needs a
-    look at the image.
-
-## Known limitations
-
-### What the model output supports (measured on the Uplarshi centre crop)
-
-These are properties of what the model produces, measured on job `JOB-98528EC34E`, not
-gaps in the code:
-
-- **Road-bounded blocks cannot be derived from this output**, so plots are not made by
-  splitting blocks (candidate plots use morphological tessellation instead, which needs no
-  closed blocks; see [Candidate plots](#candidate-plots) for what it gets wrong):
-  - The detected roads do not form a closed network. The crop's 64 road features remain
-    64 separate pieces, and removing them from the crop leaves **one road-bounded block**
-    of 10,847 m² (of 11,932 m²). Widening every road by 1 m or 2 m to close gaps still
-    leaves one block.
-  - **No candidate parcel contains a building.** Candidate parcels are Field regions,
-    and Field and Building are separate classes of the segmentation.
-  - The model merges neighbouring roofs: the crop has **16 buildings of 5 m² or more**
-    (6,853 m²), against **21** in the existing land-cover layer over the same ground, and
-    16 % more building area (6,880 m² against 5,955 m²).
-- **Most features are ranked High for review.** On the crop, 136 of 194 features (70 %)
-  are High, all of them because the feature's mean model confidence is below 0.60
-  (range 0.34 to 0.60, median 0.46); 111 also have high entropy. 84 of the 136 are under
-  5 m², pieces made mostly of class-boundary pixels where the model is least sure. Mean
-  confidence is 0.74 per pixel and 0.54 per feature. The thresholds are unchanged
-  starting values, not calibrated against ground truth, so the ranking orders the
-  review but is not a measure of error.
-
-- **18 fragments under 1 m² survive the sieve on the full image** (1.4 % of features): islands of valid pixels at the image's transparent margin with no neighbour large enough to merge into; a fix (stepped sieve) is kept on branch `stepped-sieve`, not in the submitted pipeline.
-
-### Data that does not exist yet
-
-These follow from data that does not exist yet, not from missing code:
-
-- **The orthoimage is not in git.** The Uplarshi orthomosaic (`uplarshi.tif`, 1.09 GB,
-  Web Mercator, 2.6 cm ground pixels) is supplied locally in `backend/data/imagery/`.
-  The measurements below come from a 4096 x 4096 px crop over the village centre
-  (`uplarshi_centre_4096.tif`, 1.19 ha), processed with the current pipeline.
-- **The two existing layers carry no confidence or entropy.** They were exported before
-  those were recorded. Their review priority therefore comes from geometry and road
-  access only, and the application says "Model uncertainty not recorded".
-- **Most existing features are fragments.** 3,932 of the 5,363 land-cover features are
-  under 1 m², and two "candidate parcels" are merged regions of 4.7 ha and 2.2 ha with
-  thousands of holes. They are ranked High priority for that reason.
-- **No DSM or DTM**, so the 3D view shows flat footprints and says heights are unavailable.
-- **No authoritative parcel layer**, so parcel reasoning runs in candidate mode.
-- **The assignment registry holds one demo assignment** with a placeholder rectangle. The
-  application labels it DEMO and reports that its declared area (12.5 ha) does not match
-  its geometry (1,085 ha).
-- **Geometry editing covers the outer ring of single polygons**: drag a vertex, click an
-  edge to add one, right-click to remove one. Holes are kept as they are, multi-part
-  features cannot be edited, and drawing a new polygon from nothing is not implemented.
-- **Jobs run one at a time in the API process.** A job interrupted by a restart is marked
-  failed and must be started again.
-- **State is in SQLite**, which suits one server. Several API servers would need the
-  store moved to Postgres ([architecture](docs/architecture.md#persistence)).
+See [LICENSE](LICENSE).
